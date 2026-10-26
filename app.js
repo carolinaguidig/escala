@@ -1,4 +1,4 @@
-const APP_VERSION='20261026-1525';
+const APP_VERSION='20261026-1530';
 
 (() => {
 const S = {
@@ -157,6 +157,9 @@ function importPanel(){
 }
 
 // ---------- trocas de plantão ----------
+// Pode trocar: noturno 19h–07h em qualquer dia; no sábado e no domingo também o diurno 07h–19h.
+function canSwapShift(s){ if(!s) return false; const wd=parseD(s.date).getDay(); return (s.start==='19:00'&&s.end==='07:00') || ((wd===0||wd===6)&&s.start==='07:00'&&s.end==='19:00'); }
+const SWAP_RULE='Só entram em troca os plantões noturnos (19h–07h) e, no sábado e no domingo, também os diurnos (07h–19h).';
 const firstName = rid => (resName(rid)||'').split(' ')[0];
 function swapsList(){ return Object.entries(S.swaps||{}).map(([id,x])=>({...x,id})).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')); }
 function shiftById(id){ return allShifts().find(s=>s.id===id); }
@@ -204,6 +207,7 @@ function coordSwapsPanel(){
 }
 function openSwap(sid){
   const r=myRes(), mine=shiftById(sid); if(!r||!mine) return;
+  if(!canSwapShift(mine)){ toast(SWAP_RULE); return; }
   const yr=S.residents[r]?.year;
   const mates=Object.entries(S.residents).filter(([id,x])=>id!==r && x.year===yr).sort((a,b)=>a[1].name.localeCompare(b[1].name,'pt-BR'));
   if(!mates.length){ toast('Não há outros residentes do seu ano para trocar.'); return; }
@@ -215,7 +219,7 @@ function renderSwapSheet(){
   const r=myRes(), mine=shiftById(d.sid), td=today(), yr=S.residents[r]?.year;
   const mates=Object.entries(S.residents).filter(([id,x])=>id!==r && x.year===yr).sort((a,b)=>a[1].name.localeCompare(b[1].name,'pt-BR'));
   const busy=busySwapIds();
-  const theirs=allShifts().filter(s=>s.residentId===d.to && s.date>=td && !S.marks[s.id]?.in);
+  const theirs=allShifts().filter(s=>s.residentId===d.to && s.date>=td && !S.marks[s.id]?.in && canSwapShift(s));
   const opts=theirs.map(s=>`<label class="li" style="justify-content:flex-start;gap:10px;cursor:pointer;flex-wrap:nowrap"><input type="radio" name="swpick" value="${esc(s.id)}" ${d.pick===s.id?'checked':''} ${busy.has(s.id)?'disabled':''}><span class="l"><b>${shiftLabel(s)}</b>${busy.has(s.id)?'<span class="muted" style="font-size:.82rem">já tem um pedido de troca em andamento</span>':''}</span></label>`).join('');
   const pick=d.pick&&shiftById(d.pick);
   const wMe=pick?swapWarnings(r, pick, mine, d.to):[], wThem=pick?swapWarnings(d.to, mine, pick, r):[];
@@ -223,7 +227,8 @@ function renderSwapSheet(){
     <div class="muted" style="font-size:.9rem">Seu plantão: <b style="color:var(--ink)">${shiftLabel(mine)}</b></div>
     <label class="f">Trocar com (${esc(yr||'')})<select id="swTo">${mates.map(([id,x])=>`<option value="${esc(id)}" ${id===d.to?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label>
     <span class="f-lab">Plantão de ${esc(firstName(d.to))} que você assume</span>
-    <div class="list">${opts||'<div class="empty">Essa pessoa não tem plantões futuros na escala.</div>'}</div>
+    <div class="list">${opts||'<div class="empty">Essa pessoa não tem plantões futuros que possam ser trocados.</div>'}</div>
+    <div class="muted" style="font-size:.8rem">${SWAP_RULE}</div>
     ${wMe.length?`<div class="warnline">Para você: ${wMe.join('; ')}.</div>`:''}${wThem.length?`<div class="warnline">Para ${esc(firstName(d.to))}: ${wThem.join('; ')}.</div>`:''}
     <label class="f">Recado (opcional)<input id="swNote" type="text" maxlength="200" value="${esc(d.note||'')}"></label>
     <div class="row"><button class="primary" data-act="sendswap" ${pick?'':'disabled'}>Enviar pedido de troca</button></div>
@@ -400,7 +405,7 @@ function shiftCard(s, c, mine){
   const st=status(s,c), t=times(s), me=s.residentId===mine;
   return `<article class="scard ${me?'mine':''}">${avatar(s.residentId)}
     <span class="tt"><span>${s.start}</span><span>${s.end}</span></span>
-    <span class="nmc"><b>${esc(resName(s.residentId))}</b><span class="sub"><span>${fmtHM(t.mins)}</span><span class="pill ${st.cls}">${esc(st.label)}</span>${me?'<span class="pill p-done">você</span>':''}${s.swap?'<span class="pill p-wait">troca</span>':''}${me&&s.date>=today()&&!c?.in&&!busySwapIds().has(s.id)?`<button class="ghost" style="padding:2px 6px" data-act="swap" data-id="${esc(s.id)}">Trocar</button>`:''}${S.isCoord&&c?.flag?'<span class="pill p-post">fora da área</span>':''}</span></span></article>`;
+    <span class="nmc"><b>${esc(resName(s.residentId))}</b><span class="sub"><span>${fmtHM(t.mins)}</span><span class="pill ${st.cls}">${esc(st.label)}</span>${me?'<span class="pill p-done">você</span>':''}${s.swap?'<span class="pill p-wait">troca</span>':''}${me&&s.date>=today()&&!c?.in&&!busySwapIds().has(s.id)&&canSwapShift(s)?`<button class="ghost" style="padding:2px 6px" data-act="swap" data-id="${esc(s.id)}">Trocar</button>`:''}${S.isCoord&&c?.flag?'<span class="pill p-post">fora da área</span>':''}</span></span></article>`;
 }
 function viewEscala(){
   const shifts=allShifts();
@@ -459,7 +464,7 @@ function viewMeus(){
   const reqs=allRequests().filter(q=>q.residentId===r);
   const reqByShift={}; reqs.forEach(q=>reqByShift[q.shiftId]=q);
   const pillFor = q => q.status==='aprovado'?'<span class="pill p-yes">Compensação autorizada</span>':q.status==='negado'?'<span class="pill p-no">Compensação negada</span>':'<span class="pill p-pend">Aguardando coordenação</span>';
-  const up=upcoming.map(s=>{const st=status(s,idx[s.id]); return `<div class="li"><span class="l"><b>${fmtDay(s.date)}</b><span class="muted" style="font-size:.88rem">${esc(hospName(s.hospitalId))}${S.stages[s.stageId]?' · '+esc(S.stages[s.stageId].name):''} · <span class="time">${s.start}–${s.end}</span></span></span><span class="row" style="gap:6px"><span class="pill ${st.cls}">${esc(st.label)}</span>${s.date>=today()&&!idx[s.id]?.in&&!busySwapIds().has(s.id)?`<button class="ghost" data-act="swap" data-id="${esc(s.id)}">Trocar</button>`:''}</span></div>`}).join('');
+  const up=upcoming.map(s=>{const st=status(s,idx[s.id]); return `<div class="li"><span class="l"><b>${fmtDay(s.date)}</b><span class="muted" style="font-size:.88rem">${esc(hospName(s.hospitalId))}${S.stages[s.stageId]?' · '+esc(S.stages[s.stageId].name):''} · <span class="time">${s.start}–${s.end}</span></span></span><span class="row" style="gap:6px"><span class="pill ${st.cls}">${esc(st.label)}</span>${s.date>=today()&&!idx[s.id]?.in&&!busySwapIds().has(s.id)&&canSwapShift(s)?`<button class="ghost" data-act="swap" data-id="${esc(s.id)}">Trocar</button>`:''}</span></div>`}).join('');
   const hist=past.map(s=>{ const c=idx[s.id]; const ex=extraMins(s,c); const q=reqByShift[s.id];
     const real = c?.in ? `<span class="time">${hm(new Date(c.in))}–${c.out?hm(new Date(c.out)):'…'}</span>` : '<span class="pill p-miss">Sem registro</span>';
     const act = q ? pillFor(q) : (ex>=10 ? `<button class="primary" data-act="ask" data-id="${s.id}">Justificar ${fmtDur(ex)}</button>` : '');
@@ -873,6 +878,7 @@ const actions = {
     const d=S.swapDraft, r=myRes(); if(!d||!d.pick) return;
     const A=shiftById(d.sid), B=shiftById(d.pick);
     if(!A||!B||A.residentId!==r||B.residentId!==d.to){ toast('A escala mudou. Abra a troca de novo.'); closeModal(); return; }
+    if(!canSwapShift(A)||!canSwapShift(B)){ toast(SWAP_RULE); return; }
     if(busySwapIds().has(A.id)||busySwapIds().has(B.id)){ toast('Um desses plantões já tem um pedido de troca em andamento.'); return; }
     const doc={from:r, to:d.to, aMonth:A.month, aId:A.id, aDate:A.date, bMonth:B.month, bId:B.id, bDate:B.date, status:'pendente', createdAt:nowISO(), note:(d.note||'').trim()};
     closeModal(); S.swapDraft=null;
