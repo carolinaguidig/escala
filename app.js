@@ -1,3 +1,4 @@
+const APP_VERSION='20261026-1525';
 
 (() => {
 const S = {
@@ -813,7 +814,8 @@ const actions = {
     modal(`<div class="row between"><h2>Minha conta</h2><button class="ghost" data-act="close">Fechar</button></div>
       <div class="list"><div class="li"><span class="l"><b>${esc(S.user?.displayName||'')}</b><span class="muted">${esc(S.email||'')}</span></span></div>
       <div class="li"><span class="l"><span class="muted">${[S.isCoord?'Coordenação':'', r?`Residente: ${esc(resName(r))} (${esc(S.residents[r]?.year||'')})`:''].filter(Boolean).join(' · ')}</span></span></div></div>
-      <div class="row"><button class="bad" data-act="logout">Sair</button></div>`);
+      <div class="row"><button class="bad" data-act="logout">Sair</button></div>
+      <div class="muted" style="font-size:.8rem">Versão do app: ${APP_VERSION}</div>`);
   },
   async logout(){ closeModal(); await firebase.auth().signOut(); },
   async login(){
