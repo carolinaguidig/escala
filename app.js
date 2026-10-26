@@ -736,14 +736,24 @@ const actions = {
   },
   async logout(){ closeModal(); await firebase.auth().signOut(); },
   async login(){
+    if(inAppBrowser()){ openInBrowserHelp(); return; }
     const auth=firebase.auth(), p=new firebase.auth.GoogleAuthProvider();
     p.setCustomParameters({prompt:'select_account'});
     try { await auth.signInWithPopup(p); }
     catch(e){
-      if(['auth/popup-blocked','auth/operation-not-supported-in-this-environment','auth/cancelled-popup-request'].includes(e?.code)){ try{ await auth.signInWithRedirect(p); }catch(e2){ toast('Não foi possível abrir o login do Google.'); } }
-      else if(e?.code==='auth/unauthorized-domain') toast('Este endereço ainda não foi autorizado no Firebase (Authentication → Configurações → Domínios autorizados).');
-      else if(e?.code!=='auth/popup-closed-by-user') toast('Não foi possível entrar. Tente de novo.');
+      const c=e?.code||'';
+      if(c==='auth/unauthorized-domain') toast('Este endereço ainda não foi autorizado no Firebase (Authentication → Configurações → Domínios autorizados).');
+      else if(c==='auth/popup-closed-by-user' || c==='auth/cancelled-popup-request') {}
+      else if(c==='auth/popup-blocked' || c==='auth/operation-not-supported-in-this-environment' || c==='auth/web-storage-unsupported') openInBrowserHelp(true);
+      else if(c==='auth/network-request-failed') toast('Sem internet. Tente de novo quando a conexão voltar.');
+      else toast('Não foi possível entrar. Tente de novo.');
     }
+  },
+  copylink(el){
+    const url=location.href.split('#')[0];
+    const done=()=>{ el.textContent='Link copiado'; setTimeout(()=>{ el.textContent='Copiar o link'; },2500); };
+    if(navigator.clipboard?.writeText) navigator.clipboard.writeText(url).then(done).catch(()=>{ const i=document.getElementById('linkTxt'); if(i){ i.select(); } });
+    else { const i=document.getElementById('linkTxt'); if(i) i.select(); }
   },
   geo(el){ openGeo(el.dataset.id); },
   async geosearch(){
@@ -809,9 +819,30 @@ function screen(html){
   renderWho();
   document.getElementById('view').innerHTML=html;
 }
+function inAppBrowser(){
+  const ua=navigator.userAgent||'';
+  if(/WhatsApp|FBAN|FBAV|FB_IAB|Instagram|Line\/|LinkedInApp|Twitter|TikTok|Snapchat|GSA\/|Telegram/i.test(ua)) return true;
+  // iPhone: navegador embutido de outro app não tem "Safari/" no identificador
+  if(/iPhone|iPad|iPod/.test(ua) && !/Safari\//.test(ua) && !window.navigator.standalone) return true;
+  // Android: WebView de outro app
+  if(/Android/.test(ua) && /; wv\)/.test(ua)) return true;
+  return false;
+}
+function openInBrowserHelp(fromError){
+  const ios=/iPhone|iPad|iPod/.test(navigator.userAgent), url=location.href.split('#')[0];
+  modal(`<div class="row between"><h2>Abra no ${ios?'Safari':'Chrome'}</h2><button class="ghost" data-act="close">Fechar</button></div>
+    <p style="margin:0">${fromError?'Este navegador bloqueou a janela de login do Google.':'Você abriu o app por dentro de outro aplicativo (como o WhatsApp), e o Google não deixa entrar por ali.'} Abra o link direto no <b>${ios?'Safari':'Chrome'}</b>:</p>
+    <ol style="margin:0;padding-left:20px;display:grid;gap:6px">
+      ${ios?'<li>Toque no ícone de compartilhar ou no menu <b>⋯</b> desta tela e escolha <b>Abrir no Safari</b>.</li><li>Ou copie o link abaixo, abra o Safari e cole na barra de endereço.</li>':'<li>Toque no menu <b>⋮</b> desta tela e escolha <b>Abrir no Chrome</b> (ou "Abrir no navegador").</li><li>Ou copie o link abaixo, abra o Chrome e cole na barra de endereço.</li>'}
+    </ol>
+    <input id="linkTxt" type="text" readonly value="${esc(url)}" style="width:100%">
+    <div class="row"><button class="primary" data-act="copylink">Copiar o link</button>${fromError?'<button data-act="login">Tentar de novo</button>':''}</div>`);
+}
 function showLogin(){
+  const iab=inAppBrowser(), ios=/iPhone|iPad|iPod/.test(navigator.userAgent);
   screen(`<section class="panel stack" style="max-width:460px;width:100%;margin:40px auto 0;text-align:center;justify-items:center">
     <h2>Entrar</h2><p class="muted" style="margin:0">Use a conta Google do e-mail que a coordenação cadastrou.</p>
+    ${iab?`<div class="banner" style="background:var(--post-soft);text-align:left"><span>Você abriu o app por dentro de outro aplicativo. Para entrar, abra o link no <b>${ios?'Safari':'Chrome'}</b>.</span></div>`:''}
     <button class="primary big" data-act="login">Entrar com Google</button></section>`);
 }
 function showNoAccess(){
@@ -853,7 +884,6 @@ function boot(){
   try{ fs.enablePersistence({synchronizeTabs:true}).catch(()=>{}); }catch(e){}
   S.fs=fs; S.db=adapter(fs);
   const auth=firebase.auth();
-  auth.getRedirectResult().catch(e=>{ if(e?.code==='auth/unauthorized-domain') toast('Este endereço ainda não foi autorizado no Firebase.'); });
   auth.onAuthStateChanged(async u=>{
     stopAll(); S.ready=false; S.marks={}; S.isCoord=false; S.memberRes=null;
     if(!u){ S.user=null; S.email=null; showLogin(); return; }
