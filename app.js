@@ -1,4 +1,4 @@
-const APP_VERSION='20261026-1530';
+const APP_VERSION='20261026-1725';
 
 (() => {
 const S = {
@@ -240,6 +240,15 @@ document.addEventListener('change', ev=>{
 });
 document.addEventListener('input', ev=>{ if(ev.target.id==='swNote' && S.swapDraft) S.swapDraft.note=ev.target.value; });
 
+// ---------- filtro por hospital ----------
+try{ S.hospFilter=localStorage.getItem('esc_hosp')||''; }catch(e){ S.hospFilter=''; }
+function hospChips(){
+  const hs=Object.entries(S.hospitals).sort((a,b)=>a[1].name.localeCompare(b[1].name));
+  if(hs.length<2) return '';
+  const f=S.hospitals[S.hospFilter]?S.hospFilter:'';
+  return `<div class="hchips" role="group" aria-label="Filtrar por hospital"><button data-act="hfilter" data-v="" aria-pressed="${!f}">Todos os hospitais</button>${hs.map(([id,h])=>`<button data-act="hfilter" data-v="${esc(id)}" aria-pressed="${f===id}" title="${esc(h.name)}">${esc(h.short||h.name)}</button>`).join('')}</div>`;
+}
+
 const MAX_WEEK_MIN = 60*60; // Lei 6.932/81: até 60 h semanais
 const WD = ['dom','seg','ter','qua','qui','sex','sáb'];
 const MON = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
@@ -430,7 +439,8 @@ function dayHeader(day, extra=''){ return `<div class="dayline"><b>${day===today
 function segTodos(shifts){
   const day=S.date, idx=checkIndex(), mine=myRes();
   const dayShifts=shifts.filter(s=>s.date===day);
-  const groups=Object.entries(S.hospitals).sort((a,b)=>a[1].name.localeCompare(b[1].name)).map(([hid,h])=>{
+  const hf=S.hospitals[S.hospFilter]?S.hospFilter:'';
+  const groups=Object.entries(S.hospitals).sort((a,b)=>a[1].name.localeCompare(b[1].name)).filter(([hid])=>!hf||hid===hf).map(([hid,h])=>{
     const list=dayShifts.filter(s=>s.hospitalId===hid);
     const st=stageBlock(hid, day, mine);
     if(!list.length && !st) return '';
@@ -438,7 +448,7 @@ function segTodos(shifts){
   }).join('');
   const posts=postOn(day,shifts).length, comps=compOn(day);
   return `${swapBanner()}${day===today()&&mine?meCard():''}${dayHeader(day, `${dayShifts.length} plantões · ${posts} em pós-plantão`)}${comps.length?`<div class="banner" style="background:var(--panel)"><span><b>Folga compensatória:</b> ${comps.map(r=>esc(resName(r.residentId))+' ('+esc(r.compPeriod||'')+')').join(', ')}</span></div>`:''}
-  <div class="hgrid" id="hospitais">${groups||`<div class="panel stack"><span class="muted">Nenhum plantão escalado neste dia.</span>${S.isCoord?'<div><button class="primary" data-act="goManage">Montar a escala deste dia</button></div>':''}</div>`}</div>${exampleNote()}`;
+  ${hospChips()}<div class="hgrid" id="hospitais">${groups||`<div class="panel stack"><span class="muted">Nenhum plantão escalado neste dia.</span>${S.isCoord?'<div><button class="primary" data-act="goManage">Montar a escala deste dia</button></div>':''}</div>`}</div>${exampleNote()}`;
 }
 function segMeus(){
   if (myRes()) return viewMeus();
@@ -459,7 +469,7 @@ function viewMeus(){
   const wk=shifts.filter(s=>s.date>=wa&&s.date<=wb);
   const wkMin=wk.reduce((t,s)=>t+(workedMins(s,idx[s.id])??times(s).mins),0);
   const pct=Math.min(100, wkMin/MAX_WEEK_MIN*100);
-  const upcoming=shifts.filter(s=>times(s).b>now).slice(0,8);
+  const upAll=shifts.filter(s=>times(s).b>now); const upcoming=S.showAllUp?upAll:upAll.slice(0,10);
   const past=shifts.filter(s=>times(s).b<=now && s.date>=addDays(today(),-30)).reverse();
   const reqs=allRequests().filter(q=>q.residentId===r);
   const reqByShift={}; reqs.forEach(q=>reqByShift[q.shiftId]=q);
@@ -475,7 +485,7 @@ function viewMeus(){
     <div class="meter ${wkMin>MAX_WEEK_MIN?'hot':''}"><i style="width:${pct}%"></i></div>
     <div class="muted" style="font-size:.82rem">Conta as horas reais dos plantões com checkout e as horas da escala dos demais. Limite da Lei 6.932/81.</div></section>
   <section class="two">
-    <div class="panel" id="proximos"><h2 style="margin-bottom:6px">Próximos plantões</h2><div class="list">${up||'<div class="empty">Nenhum plantão futuro na escala.</div>'}</div></div>
+    <div class="panel" id="proximos"><h2 style="margin-bottom:6px">Próximos plantões</h2><div class="list">${up||'<div class="empty">Nenhum plantão futuro na escala.</div>'}</div>${upAll.length>10?`<button class="ghost" data-act="toggleup">${S.showAllUp?'Mostrar só os próximos':`Ver todos os ${upAll.length} plantões futuros`}</button>`:''}</div>
     <div class="panel" id="historico"><div class="sec-title"><h2>Últimos 30 dias</h2><button class="ghost" data-act="ask" data-id="">Nova solicitação</button></div><div class="list">${hist||'<div class="empty">Sem plantões recentes.</div>'}</div></div>
   </section>
   ${mySwapsPanel()}
@@ -746,6 +756,8 @@ const actions = {
   cf(el){ S.compFilter=el.dataset.v; render(); },
   day(el){ S.date=addDays(S.date,+el.dataset.n); render(); },
   today(){ S.date=today(); render(); },
+  hfilter(el){ S.hospFilter=el.dataset.v||''; try{ localStorage.setItem('esc_hosp', S.hospFilter); }catch(e){} render(); },
+  toggleup(){ S.showAllUp=!S.showAllUp; render(); },
   pick(el){ S.date=el.dataset.d; render(); },
   goManage(){ S.manageDate=S.date; S.tab='gerenciar'; render(); window.scrollTo({top:0}); },
   seg(el){ S.seg=el.dataset.v; render(); },
