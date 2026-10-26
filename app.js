@@ -2,7 +2,7 @@
 (() => {
 const S = {
   db:null, fs:null, user:null, email:null, memberRes:null, isCoord:false, ready:false,
-  residents:{}, hospitals:{}, schedule:{}, vacations:{}, members:{}, coordinators:{}, marks:{}, requests:{}, decisions:{}, config:{}, stages:{}, stageAssign:{}, form:{hosp:'',stage:'',until:'',days:[]},
+  residents:{}, hospitals:{}, schedule:{}, vacations:{}, swaps:{}, members:{}, coordinators:{}, marks:{}, requests:{}, decisions:{}, config:{}, stages:{}, stageAssign:{}, form:{hosp:'',stage:'',until:'',days:[]},
   tab:'escala', seg:'todos', monthOpen:false, date:null, month:null, compFilter:'pend', manageDate:null, profiles:{}, busy:false, pending:false
 };
 // ---------- Firebase: helpers ----------
@@ -154,6 +154,85 @@ function importPanel(){
     <input type="file" id="impFile" accept=".json,application/json">
     <div><button class="primary" data-act="importjson">Importar</button></div></div></details></section>`;
 }
+
+// ---------- trocas de plantão ----------
+const firstName = rid => (resName(rid)||'').split(' ')[0];
+function swapsList(){ return Object.entries(S.swaps||{}).map(([id,x])=>({...x,id})).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')); }
+function shiftById(id){ return allShifts().find(s=>s.id===id); }
+function shiftLabel(s){ return s?`${WD[parseD(s.date).getDay()]} ${fmtShort(s.date)} · ${esc(S.hospitals[s.hospitalId]?.short||hospName(s.hospitalId))} ${s.start}–${s.end}${S.stages[s.stageId]?' · '+esc(S.stages[s.stageId].name):''}`:'plantão que saiu da escala'; }
+// Problemas que a troca criaria para `rid`, que passa a fazer `gain` e deixa `lose` para `other`.
+function swapWarnings(rid, gain, lose, other){
+  if(!gain||!lose) return [];
+  const hyp=allShifts().map(s=> s.id===gain.id?{...s,residentId:rid} : s.id===lose.id?{...s,residentId:other} : s);
+  const w=[];
+  if(onVac(rid, gain.date)) w.push(`está de férias em ${fmtShort(gain.date)}`);
+  if(hyp.some(s=>s.residentId===rid && s.date===gain.date && s.id!==gain.id)) w.push(`já tem outro plantão em ${fmtShort(gain.date)}`);
+  if(postOn(gain.date, hyp).some(p=>p.residentId===rid)) w.push(`${fmtShort(gain.date)} é dia de pós-plantão`);
+  const pd=postDate(gain); if(pd && hyp.some(s=>s.residentId===rid && s.date===pd && s.id!==gain.id)) w.push(`o pós-plantão cairia em ${fmtShort(pd)}, quando já tem plantão`);
+  return w;
+}
+const busySwapIds = () => new Set(swapsList().filter(x=>x.status==='pendente').flatMap(x=>[x.aId,x.bId]));
+function swapBanner(){
+  const r=myRes(); if(!r) return '';
+  const n=swapsList().filter(x=>x.to===r && x.status==='pendente').length;
+  return n?`<div class="banner" style="background:var(--post-soft)"><span><b>${n} pedido${n===1?'':'s'} de troca</b> esperando sua resposta</span><button class="primary" data-act="seg" data-v="meus">Ver</button></div>`:'';
+}
+function mySwapsPanel(){
+  const r=myRes(); if(!r) return '';
+  const list=swapsList().filter(x=>x.from===r||x.to===r);
+  if(!list.length) return '';
+  const recv=list.filter(x=>x.to===r&&x.status==='pendente'), sent=list.filter(x=>x.from===r&&x.status==='pendente');
+  const done=list.filter(x=>x.status!=='pendente').slice(0,6);
+  const note=x=>x.note?`<div class="quote">${esc(x.note)}</div>`:'';
+  const recvH=recv.map(x=>{ const A=shiftById(x.aId), B=shiftById(x.bId); const w=swapWarnings(r, A, B, x.from);
+    return `<article class="req pend"><b>${esc(resName(x.from))} quer trocar com você</b>
+      <div>Você passa a fazer: <b>${shiftLabel(A)}</b></div><div class="muted">${esc(firstName(x.from))} faz o seu: ${shiftLabel(B)}</div>${note(x)}
+      ${w.length?`<div class="warnline">Atenção: ${w.join('; ')}.</div>`:''}
+      <div class="row"><button class="ok" data-act="acceptswap" data-id="${esc(x.id)}">Aceitar troca</button><button class="bad" data-act="declineswap" data-id="${esc(x.id)}">Recusar</button></div></article>`; }).join('');
+  const sentH=sent.map(x=>`<article class="req"><div class="row between"><b>Pedido para ${esc(resName(x.to))}</b><span class="pill p-pend">Aguardando</span></div>
+      <div>Você passa a fazer: ${shiftLabel(shiftById(x.bId))}</div><div class="muted">${esc(firstName(x.to))} faz o seu: ${shiftLabel(shiftById(x.aId))}</div>${note(x)}
+      <div><button class="ghost" style="color:var(--bad)" data-act="cancelswap" data-id="${esc(x.id)}">Cancelar pedido</button></div></article>`).join('');
+  const lab={aceita:['Feita','p-yes'],recusada:['Recusada','p-no'],cancelada:['Cancelada','p-wait']};
+  const doneH=done.length?`<div class="panel"><div class="list">${done.map(x=>`<div class="li"><span class="l"><b>${x.from===r?'Com '+esc(resName(x.to)):'Com '+esc(resName(x.from))}</b><span class="muted" style="font-size:.85rem">${fmtShort(x.aDate)} ⇄ ${fmtShort(x.bDate)}</span></span><span class="pill ${lab[x.status]?.[1]||'p-wait'}">${lab[x.status]?.[0]||esc(x.status)}</span></div>`).join('')}</div></div>`:'';
+  return `<section class="stack" id="trocas"><h2>Trocas de plantão</h2>${recvH}${sentH}${doneH}</section>`;
+}
+function coordSwapsPanel(){
+  const list=swapsList().slice(0,20); if(!list.length) return '';
+  const lab={aceita:['Feita','p-yes'],recusada:['Recusada','p-no'],cancelada:['Cancelada','p-wait'],pendente:['Pendente','p-pend']};
+  return `<section class="panel stack" id="trocas-coord"><h2>Trocas entre residentes</h2><div class="muted" style="font-size:.85rem">Feitas pelos próprios residentes no app. A escala muda quando o colega aceita.</div><div class="list">${list.map(x=>`<div class="li"><span class="l"><b>${esc(resName(x.from))} ⇄ ${esc(resName(x.to))}</b><span class="muted" style="font-size:.85rem">${fmtShort(x.aDate)} ⇄ ${fmtShort(x.bDate)}${x.answeredAt?' · '+fmtDT(x.answeredAt):''}</span></span><span class="pill ${lab[x.status]?.[1]||'p-wait'}">${lab[x.status]?.[0]||esc(x.status)}</span></div>`).join('')}</div></section>`;
+}
+function openSwap(sid){
+  const r=myRes(), mine=shiftById(sid); if(!r||!mine) return;
+  const yr=S.residents[r]?.year;
+  const mates=Object.entries(S.residents).filter(([id,x])=>id!==r && x.year===yr).sort((a,b)=>a[1].name.localeCompare(b[1].name,'pt-BR'));
+  if(!mates.length){ toast('Não há outros residentes do seu ano para trocar.'); return; }
+  S.swapDraft={sid, to:mates[0][0], pick:null, note:''};
+  renderSwapSheet();
+}
+function renderSwapSheet(){
+  const d=S.swapDraft; if(!d) return;
+  const r=myRes(), mine=shiftById(d.sid), td=today(), yr=S.residents[r]?.year;
+  const mates=Object.entries(S.residents).filter(([id,x])=>id!==r && x.year===yr).sort((a,b)=>a[1].name.localeCompare(b[1].name,'pt-BR'));
+  const busy=busySwapIds();
+  const theirs=allShifts().filter(s=>s.residentId===d.to && s.date>=td && !S.marks[s.id]?.in);
+  const opts=theirs.map(s=>`<label class="li" style="justify-content:flex-start;gap:10px;cursor:pointer;flex-wrap:nowrap"><input type="radio" name="swpick" value="${esc(s.id)}" ${d.pick===s.id?'checked':''} ${busy.has(s.id)?'disabled':''}><span class="l"><b>${shiftLabel(s)}</b>${busy.has(s.id)?'<span class="muted" style="font-size:.82rem">já tem um pedido de troca em andamento</span>':''}</span></label>`).join('');
+  const pick=d.pick&&shiftById(d.pick);
+  const wMe=pick?swapWarnings(r, pick, mine, d.to):[], wThem=pick?swapWarnings(d.to, mine, pick, r):[];
+  modal(`<div class="row between"><h2>Trocar plantão</h2><button class="ghost" data-act="close">Fechar</button></div>
+    <div class="muted" style="font-size:.9rem">Seu plantão: <b style="color:var(--ink)">${shiftLabel(mine)}</b></div>
+    <label class="f">Trocar com (${esc(yr||'')})<select id="swTo">${mates.map(([id,x])=>`<option value="${esc(id)}" ${id===d.to?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label>
+    <span class="f-lab">Plantão de ${esc(firstName(d.to))} que você assume</span>
+    <div class="list">${opts||'<div class="empty">Essa pessoa não tem plantões futuros na escala.</div>'}</div>
+    ${wMe.length?`<div class="warnline">Para você: ${wMe.join('; ')}.</div>`:''}${wThem.length?`<div class="warnline">Para ${esc(firstName(d.to))}: ${wThem.join('; ')}.</div>`:''}
+    <label class="f">Recado (opcional)<input id="swNote" type="text" maxlength="200" value="${esc(d.note||'')}"></label>
+    <div class="row"><button class="primary" data-act="sendswap" ${pick?'':'disabled'}>Enviar pedido de troca</button></div>
+    <div class="muted" style="font-size:.82rem">A escala muda assim que ${esc(firstName(d.to))} aceitar no app. A coordenação vê todas as trocas.</div>`);
+}
+document.addEventListener('change', ev=>{
+  if(ev.target.id==='swTo' && S.swapDraft){ S.swapDraft.to=ev.target.value; S.swapDraft.pick=null; renderSwapSheet(); }
+  if(ev.target.name==='swpick' && S.swapDraft){ S.swapDraft.pick=ev.target.value; renderSwapSheet(); }
+});
+document.addEventListener('input', ev=>{ if(ev.target.id==='swNote' && S.swapDraft) S.swapDraft.note=ev.target.value; });
 
 const MAX_WEEK_MIN = 60*60; // Lei 6.932/81: até 60 h semanais
 const WD = ['dom','seg','ter','qua','qui','sex','sáb'];
@@ -320,7 +399,7 @@ function shiftCard(s, c, mine){
   const st=status(s,c), t=times(s), me=s.residentId===mine;
   return `<article class="scard ${me?'mine':''}">${avatar(s.residentId)}
     <span class="tt"><span>${s.start}</span><span>${s.end}</span></span>
-    <span class="nmc"><b>${esc(resName(s.residentId))}</b><span class="sub"><span>${fmtHM(t.mins)}</span><span class="pill ${st.cls}">${esc(st.label)}</span>${me?'<span class="pill p-done">você</span>':''}${S.isCoord&&c?.flag?'<span class="pill p-post">fora da área</span>':''}</span></span></article>`;
+    <span class="nmc"><b>${esc(resName(s.residentId))}</b><span class="sub"><span>${fmtHM(t.mins)}</span><span class="pill ${st.cls}">${esc(st.label)}</span>${me?'<span class="pill p-done">você</span>':''}${s.swap?'<span class="pill p-wait">troca</span>':''}${me&&s.date>=today()&&!c?.in&&!busySwapIds().has(s.id)?`<button class="ghost" style="padding:2px 6px" data-act="swap" data-id="${esc(s.id)}">Trocar</button>`:''}${S.isCoord&&c?.flag?'<span class="pill p-post">fora da área</span>':''}</span></span></article>`;
 }
 function viewEscala(){
   const shifts=allShifts();
@@ -352,7 +431,7 @@ function segTodos(shifts){
     return `<section id="h-${esc(hid)}"><h2 class="ghead">${esc(h.short?h.short+' - ':'')}${esc(h.name)}</h2>${st}${list.length?cardsByStage(list,idx,mine):''}</section>`;
   }).join('');
   const posts=postOn(day,shifts).length, comps=compOn(day);
-  return `${day===today()&&mine?meCard():''}${dayHeader(day, `${dayShifts.length} plantões · ${posts} em pós-plantão`)}${comps.length?`<div class="banner" style="background:var(--panel)"><span><b>Folga compensatória:</b> ${comps.map(r=>esc(resName(r.residentId))+' ('+esc(r.compPeriod||'')+')').join(', ')}</span></div>`:''}
+  return `${swapBanner()}${day===today()&&mine?meCard():''}${dayHeader(day, `${dayShifts.length} plantões · ${posts} em pós-plantão`)}${comps.length?`<div class="banner" style="background:var(--panel)"><span><b>Folga compensatória:</b> ${comps.map(r=>esc(resName(r.residentId))+' ('+esc(r.compPeriod||'')+')').join(', ')}</span></div>`:''}
   <div class="hgrid" id="hospitais">${groups||`<div class="panel stack"><span class="muted">Nenhum plantão escalado neste dia.</span>${S.isCoord?'<div><button class="primary" data-act="goManage">Montar a escala deste dia</button></div>':''}</div>`}</div>${exampleNote()}`;
 }
 function segMeus(){
@@ -379,7 +458,7 @@ function viewMeus(){
   const reqs=allRequests().filter(q=>q.residentId===r);
   const reqByShift={}; reqs.forEach(q=>reqByShift[q.shiftId]=q);
   const pillFor = q => q.status==='aprovado'?'<span class="pill p-yes">Compensação autorizada</span>':q.status==='negado'?'<span class="pill p-no">Compensação negada</span>':'<span class="pill p-pend">Aguardando coordenação</span>';
-  const up=upcoming.map(s=>{const st=status(s,idx[s.id]); return `<div class="li"><span class="l"><b>${fmtDay(s.date)}</b><span class="muted" style="font-size:.88rem">${esc(hospName(s.hospitalId))}${S.stages[s.stageId]?' · '+esc(S.stages[s.stageId].name):''} · <span class="time">${s.start}–${s.end}</span></span></span><span class="pill ${st.cls}">${esc(st.label)}</span></div>`}).join('');
+  const up=upcoming.map(s=>{const st=status(s,idx[s.id]); return `<div class="li"><span class="l"><b>${fmtDay(s.date)}</b><span class="muted" style="font-size:.88rem">${esc(hospName(s.hospitalId))}${S.stages[s.stageId]?' · '+esc(S.stages[s.stageId].name):''} · <span class="time">${s.start}–${s.end}</span></span></span><span class="row" style="gap:6px"><span class="pill ${st.cls}">${esc(st.label)}</span>${s.date>=today()&&!idx[s.id]?.in&&!busySwapIds().has(s.id)?`<button class="ghost" data-act="swap" data-id="${esc(s.id)}">Trocar</button>`:''}</span></div>`}).join('');
   const hist=past.map(s=>{ const c=idx[s.id]; const ex=extraMins(s,c); const q=reqByShift[s.id];
     const real = c?.in ? `<span class="time">${hm(new Date(c.in))}–${c.out?hm(new Date(c.out)):'…'}</span>` : '<span class="pill p-miss">Sem registro</span>';
     const act = q ? pillFor(q) : (ex>=10 ? `<button class="primary" data-act="ask" data-id="${s.id}">Justificar ${fmtDur(ex)}</button>` : '');
@@ -393,6 +472,7 @@ function viewMeus(){
     <div class="panel" id="proximos"><h2 style="margin-bottom:6px">Próximos plantões</h2><div class="list">${up||'<div class="empty">Nenhum plantão futuro na escala.</div>'}</div></div>
     <div class="panel" id="historico"><div class="sec-title"><h2>Últimos 30 dias</h2><button class="ghost" data-act="ask" data-id="">Nova solicitação</button></div><div class="list">${hist||'<div class="empty">Sem plantões recentes.</div>'}</div></div>
   </section>
+  ${mySwapsPanel()}
   <section class="stack" id="minhas"><h2>Minhas solicitações</h2>${reqs.length?reqs.map(reqCard).join(''):'<div class="panel muted">Você ainda não pediu compensação de horas.</div>'}</section>
   <p class="note-ex">Você entrou como ${esc(S.email)}. <button class="ghost" data-act="logout">Sair</button></p>`;
 }
@@ -497,6 +577,7 @@ function viewGerenciar(){
     </div>
   </section>
   ${flaggedPanel()}
+  ${coordSwapsPanel()}
   ${stagesPanel()}
   ${rulesPanel()}
   ${importPanel()}`;
@@ -785,6 +866,33 @@ const actions = {
     await guard(async()=>{ for (const c of cols) for (const [id,doc] of Object.entries(data[c]||{})){ if(!/^[A-Za-z0-9_\-.~:@+]+$/.test(id)||!doc||typeof doc!=='object') continue; await S.fs.doc(`${c}/${id}`).set(doc); n++; } }, null);
     if(n) toast(`${n} registros importados`);
   },
+  swap(el){ openSwap(el.dataset.id); },
+  async sendswap(){
+    const d=S.swapDraft, r=myRes(); if(!d||!d.pick) return;
+    const A=shiftById(d.sid), B=shiftById(d.pick);
+    if(!A||!B||A.residentId!==r||B.residentId!==d.to){ toast('A escala mudou. Abra a troca de novo.'); closeModal(); return; }
+    if(busySwapIds().has(A.id)||busySwapIds().has(B.id)){ toast('Um desses plantões já tem um pedido de troca em andamento.'); return; }
+    const doc={from:r, to:d.to, aMonth:A.month, aId:A.id, aDate:A.date, bMonth:B.month, bId:B.id, bDate:B.date, status:'pendente', createdAt:nowISO(), note:(d.note||'').trim()};
+    closeModal(); S.swapDraft=null;
+    await guard(()=>S.fs.doc('swaps/sw'+Date.now().toString(36)).set(doc), `Pedido enviado para ${firstName(doc.to)}`);
+  },
+  async acceptswap(el){
+    const id=el.dataset.id, x=S.swaps[id], r=myRes(); if(!x) return;
+    const A=shiftById(x.aId), B=shiftById(x.bId);
+    if(!A||!B||A.residentId!==x.from||B.residentId!==r){ toast('A escala mudou desde o pedido. Recuse e peça uma nova troca.'); return; }
+    const w=swapWarnings(r, A, B, x.from);
+    if(w.length && !el_confirm('sw'+id)){ toast(`Atenção: ${w[0]}. Toque de novo para aceitar mesmo assim.`); return; }
+    const fs=S.fs, b=fs.batch();
+    b.update(fs.doc('swaps/'+id), {status:'aceita', answeredAt:nowISO()});
+    const upd={};
+    const put=(m,k,v)=>{ (upd[m]=upd[m]||{lastSwap:id})[k]=v; };
+    put(x.aMonth, `shifts.${x.aId}.residentId`, x.to); put(x.aMonth, `shifts.${x.aId}.swap`, id);
+    put(x.bMonth, `shifts.${x.bId}.residentId`, x.from); put(x.bMonth, `shifts.${x.bId}.swap`, id);
+    for (const [m,u] of Object.entries(upd)) b.update(fs.doc('schedule/'+m), u);
+    await guard(()=>b.commit(), 'Troca feita. A escala já foi atualizada.');
+  },
+  async declineswap(el){ await guard(()=>S.fs.doc('swaps/'+el.dataset.id).update({status:'recusada', answeredAt:nowISO()}), 'Troca recusada'); },
+  async cancelswap(el){ await guard(()=>S.fs.doc('swaps/'+el.dataset.id).update({status:'cancelada', answeredAt:nowISO()}), 'Pedido cancelado'); },
 };
 let lastConfirm={k:null,t:0};
 function el_confirm(k){ const now=Date.now(); if(lastConfirm.k===k && now-lastConfirm.t<5000){ lastConfirm={k:null,t:0}; return true; } lastConfirm={k,t:now}; return false; }
@@ -868,11 +976,14 @@ function startData(){
   const col=(name, path=name)=>{ need.add(name); unsubs.push(fs.collection(path).onSnapshot(snap=>{ const o={}; snap.forEach(d=>o[d.id]=d.data()); S[name]=o; done(name); }, err=>{ console.error(name, err); S[name]={}; done(name); toast('Sem permissão para ler parte da escala.'); })); };
   const one=(name, path)=>{ need.add(name); unsubs.push(fs.doc(path).onSnapshot(d=>{ S[name]=d.exists?{[d.id]:d.data()}:{}; done(name); }, err=>{ console.error(name, err); S[name]={}; done(name); })); };
   ['residents','hospitals','schedule','vacations','config','stages','stageAssign'].forEach(c=>col(c));
-  if(S.isCoord){ ['members','coordinators','requests','decisions'].forEach(c=>col(c)); }
+  if(S.isCoord){ ['members','coordinators','requests','decisions','swaps'].forEach(c=>col(c)); }
   else {
     S.members = S.memberRes ? {[S.email]:{residentId:S.memberRes}} : {};
     one('requests', 'requests/'+S.memberRes);
     one('decisions', 'decisions/'+S.memberRes);
+    // trocas em que o residente é quem pede ou quem recebe
+    S.swaps={}; const sw={from:{}, to:{}};
+    for (const side of ['from','to']){ need.add('swaps_'+side); unsubs.push(fs.collection('swaps').where(side,'==',S.memberRes).onSnapshot(snap=>{ const o={}; snap.forEach(d=>o[d.id]=d.data()); sw[side]=o; S.swaps={...sw.from, ...sw.to}; done('swaps_'+side); }, err=>{ console.error('swaps', err); done('swaps_'+side); })); }
   }
 }
 function boot(){
