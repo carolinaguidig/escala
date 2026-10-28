@@ -1,4 +1,4 @@
-const APP_VERSION='20261026-1725';
+const APP_VERSION='20261028-0747';
 
 (() => {
 const S = {
@@ -51,10 +51,10 @@ function geoFail(kind, s, h, g, err){
   const msg = g
     ? `Você está a <b>${fmtDist(g.dist)}</b> do ${esc(h.name)}. O ${what} é liberado a até ${fmtDist(h.geo.radius)} do hospital.${g.acc>150?` A precisão do GPS agora está baixa (±${g.acc} m); tente perto de uma janela.`:''}`
     : err?.code==='denied'
-      ? 'O celular não liberou a sua localização para este site. Permita a localização nas configurações do navegador e tente de novo.'
-      : 'Não foi possível pegar a sua localização. Confira se a localização (GPS) do celular está ligada e tente de novo.';
+      ? locHelp(true)
+      : locHelp(false);
   modal(`<div class="row between"><h2>${g?'Fora da área do hospital':'Localização indisponível'}</h2><button class="ghost" data-act="close">Fechar</button></div>
-    <p style="margin:0">${msg}</p>
+    <div>${msg}</div>
     <div class="row"><button class="primary" data-act="retrygeo" data-k="${kind}" data-id="${esc(s.id)}">Tentar de novo</button></div>
     <hr class="sep">
     <label class="f">Registrar mesmo assim, com justificativa<textarea id="gNote" placeholder="Ex.: estou no prédio anexo; o GPS não pega no centro cirúrgico"></textarea></label>
@@ -94,7 +94,7 @@ function ensureMarks(){
   if(!S.fs||!S.ready) return;
   const want=new Set(), cur=today().slice(0,7), prev=monthAdd(cur,-1);
   const days=[S.date, today(), addDays(today(),-1)]; if(S.tab==='gerenciar') days.push(S.manageDate);
-  for (const d of days){ const k='d|'+d; want.add(k); listenMarks(k, S.fs.collection(`checkins/${d.slice(0,7)}/marks`).where('date','==',d)); }
+  if(S.isCoord) for (const d of days){ const k='d|'+d; want.add(k); listenMarks(k, S.fs.collection(`checkins/${d.slice(0,7)}/marks`).where('date','==',d)); }
   const r=myRes();
   if(r) for (const m of [cur, prev]){ const k='r|'+m; want.add(k); listenMarks(k, S.fs.collection(`checkins/${m}/marks`).where('residentId','==',r)); }
   if(S.isCoord) for (const m of [cur, prev]){ const k='f|'+m; want.add(k); listenMarks(k, S.fs.collection(`checkins/${m}/marks`).where('flag','==',true)); }
@@ -247,6 +247,28 @@ function hospChips(){
   if(hs.length<2) return '';
   const f=S.hospitals[S.hospFilter]?S.hospFilter:'';
   return `<div class="hchips" role="group" aria-label="Filtrar por hospital"><button data-act="hfilter" data-v="" aria-pressed="${!f}">Todos os hospitais</button>${hs.map(([id,h])=>`<button data-act="hfilter" data-v="${esc(id)}" aria-pressed="${f===id}" title="${esc(h.name)}">${esc(h.short||h.name)}</button>`).join('')}</div>`;
+}
+
+// ---------- login por e-mail e senha ----------
+function pwError(err){
+  const c=err?.code||'';
+  if(['auth/invalid-credential','auth/wrong-password','auth/user-not-found','auth/invalid-login-credentials'].includes(c)) return 'E-mail ou senha incorretos. Se é seu primeiro acesso, toque em "Primeiro acesso: criar senha".';
+  if(c==='auth/email-already-in-use') return 'Esse e-mail já tem cadastro. Use "Entrar com e-mail e senha" ou "Esqueci a senha".';
+  if(c==='auth/weak-password') return 'Crie uma senha com pelo menos 6 caracteres.';
+  if(c==='auth/invalid-email') return 'E-mail inválido.';
+  if(c==='auth/too-many-requests') return 'Muitas tentativas seguidas. Espere alguns minutos e tente de novo.';
+  if(c==='auth/operation-not-allowed') return 'O login por e-mail e senha ainda não foi ligado no Firebase. Avise a coordenação.';
+  if(c==='auth/network-request-failed') return 'Sem internet. Tente de novo quando a conexão voltar.';
+  return 'Não foi possível concluir. Tente de novo.';
+}
+
+function locHelp(denied){
+  const ios=/iPhone|iPad|iPod/.test(navigator.userAgent);
+  const head = denied ? 'O navegador não liberou a localização para o app, mesmo que ela esteja ligada no celular.' : 'Não foi possível pegar a sua localização agora.';
+  const steps = ios
+    ? `<ol style="margin:8px 0 0;padding-left:20px;display:grid;gap:4px"><li>Ajustes → <b>Privacidade e Segurança</b> → <b>Serviços de Localização</b>: ligado.</li><li>Na mesma tela, desça até <b>Sites do Safari</b> (ou <b>Chrome</b>, se usa o Chrome) → <b>Durante o Uso</b>, com <b>Localização Exata</b> ligada.</li><li>Volte ao app, toque em <b>aA</b> na barra de endereço → <b>Ajustes do Site</b> → <b>Localização</b> → <b>Permitir</b>.</li><li>Recarregue a página e toque em check-in de novo.</li></ol>`
+    : `<ol style="margin:8px 0 0;padding-left:20px;display:grid;gap:4px"><li>Confira se a <b>Localização</b> do celular está ligada (puxe o menu do topo da tela).</li><li>No Chrome, toque no ícone ao lado do endereço → <b>Permissões</b> → <b>Localização</b> → <b>Permitir</b>.</li><li>Recarregue a página e toque em check-in de novo.</li></ol>`;
+  return `${head}${steps}<div class="muted" style="font-size:.84rem;margin-top:6px">Se abriu o link pelo WhatsApp, abra no ${ios?'Safari':'Chrome'}: o navegador do WhatsApp não libera a localização.</div>`;
 }
 
 const MAX_WEEK_MIN = 60*60; // Lei 6.932/81: até 60 h semanais
@@ -414,7 +436,7 @@ function shiftCard(s, c, mine){
   const st=status(s,c), t=times(s), me=s.residentId===mine;
   return `<article class="scard ${me?'mine':''}">${avatar(s.residentId)}
     <span class="tt"><span>${s.start}</span><span>${s.end}</span></span>
-    <span class="nmc"><b>${esc(resName(s.residentId))}</b><span class="sub"><span>${fmtHM(t.mins)}</span><span class="pill ${st.cls}">${esc(st.label)}</span>${me?'<span class="pill p-done">você</span>':''}${s.swap?'<span class="pill p-wait">troca</span>':''}${me&&s.date>=today()&&!c?.in&&!busySwapIds().has(s.id)&&canSwapShift(s)?`<button class="ghost" style="padding:2px 6px" data-act="swap" data-id="${esc(s.id)}">Trocar</button>`:''}${S.isCoord&&c?.flag?'<span class="pill p-post">fora da área</span>':''}</span></span></article>`;
+    <span class="nmc"><b>${esc(resName(s.residentId))}</b><span class="sub"><span>${fmtHM(t.mins)}</span>${(S.isCoord||me)?`<span class="pill ${st.cls}">${esc(st.label)}</span>`:''}${me?'<span class="pill p-done">você</span>':''}${s.swap?'<span class="pill p-wait">troca</span>':''}${me&&s.date>=today()&&!c?.in&&!busySwapIds().has(s.id)&&canSwapShift(s)?`<button class="ghost" style="padding:2px 6px" data-act="swap" data-id="${esc(s.id)}">Trocar</button>`:''}${S.isCoord&&c?.flag?'<span class="pill p-post">fora da área</span>':''}</span></span></article>`;
 }
 function viewEscala(){
   const shifts=allShifts();
@@ -913,6 +935,32 @@ const actions = {
   },
   async declineswap(el){ await guard(()=>S.fs.doc('swaps/'+el.dataset.id).update({status:'recusada', answeredAt:nowISO()}), 'Troca recusada'); },
   async cancelswap(el){ await guard(()=>S.fs.doc('swaps/'+el.dataset.id).update({status:'cancelada', answeredAt:nowISO()}), 'Pedido cancelado'); },
+  async pwlogin(){
+    const e=normEmail(document.getElementById('lgEmail')?.value, true), p=document.getElementById('lgPass')?.value||'';
+    if(!e){ toast('Digite o e-mail.'); return; } if(!p){ toast('Digite a senha.'); return; }
+    try{ await firebase.auth().signInWithEmailAndPassword(e, p); }catch(err){ toast(pwError(err)); }
+  },
+  async pwcreate(){
+    const e=normEmail(document.getElementById('lgEmail')?.value, true), p=document.getElementById('lgPass')?.value||'';
+    if(!e){ toast('Digite o e-mail que a coordenação cadastrou e uma senha nova.'); return; }
+    if(p.length<6){ toast('Crie uma senha com pelo menos 6 caracteres.'); return; }
+    try{ const c=await firebase.auth().createUserWithEmailAndPassword(e, p); await c.user.sendEmailVerification({url: location.href.split('#')[0]}); toast('Enviamos o link de confirmação para o seu e-mail.'); }
+    catch(err){ toast(pwError(err)); }
+  },
+  async pwreset(){
+    const e=normEmail(document.getElementById('lgEmail')?.value, true);
+    if(!e){ toast('Digite seu e-mail no campo acima e toque de novo em Esqueci a senha.'); return; }
+    try{ await firebase.auth().sendPasswordResetEmail(e, {url: location.href.split('#')[0]}); toast('Se esse e-mail tiver cadastro, chega um link para criar uma senha nova.'); }
+    catch(err){ toast(pwError(err)); }
+  },
+  async pwcheck(){
+    const u=firebase.auth().currentUser; if(!u) return;
+    try{ await u.reload(); }catch(e){}
+    const v=firebase.auth().currentUser;
+    if(v && v.emailVerified){ try{ await v.getIdToken(true); }catch(e){} handleUser(v); }
+    else toast('Ainda não confirmado. Abra o link do e-mail e toque de novo.');
+  },
+  async pwresend(){ const u=firebase.auth().currentUser; if(!u) return; try{ await u.sendEmailVerification({url: location.href.split('#')[0]}); toast('E-mail reenviado. Veja também a caixa de spam.'); }catch(err){ toast(pwError(err)); } },
 };
 let lastConfirm={k:null,t:0};
 function el_confirm(k){ const now=Date.now(); if(lastConfirm.k===k && now-lastConfirm.t<5000){ lastConfirm={k:null,t:0}; return true; } lastConfirm={k,t:now}; return false; }
@@ -968,10 +1016,26 @@ function openInBrowserHelp(fromError){
 }
 function showLogin(){
   const iab=inAppBrowser(), ios=/iPhone|iPad|iPod/.test(navigator.userAgent);
-  screen(`<section class="panel stack" style="max-width:460px;width:100%;margin:40px auto 0;text-align:center;justify-items:center">
-    <h2>Entrar</h2><p class="muted" style="margin:0">Use a conta Google do e-mail que a coordenação cadastrou.</p>
+  const google=`<button class="${ios?'':'primary '}big" data-act="login" style="width:100%">Entrar com Google</button>`;
+  const pw=`<div class="stack" style="width:100%;text-align:left;gap:10px">
+      <label class="f">E-mail<input id="lgEmail" type="email" autocomplete="username" inputmode="email" autocapitalize="none" style="width:100%"></label>
+      <label class="f">Senha<input id="lgPass" type="password" autocomplete="current-password" style="width:100%"></label>
+      <button class="${ios?'primary ':''}big" data-act="pwlogin" style="width:100%">Entrar com e-mail e senha</button>
+      <div class="row between" style="gap:4px"><button class="ghost" data-act="pwcreate">Primeiro acesso: criar senha</button><button class="ghost" data-act="pwreset">Esqueci a senha</button></div>
+    </div>`;
+  const or='<div class="orline"><span>ou</span></div>';
+  screen(`<section class="panel stack" style="max-width:460px;width:100%;margin:28px auto 0;text-align:center;justify-items:center">
+    <h2>Entrar</h2><p class="muted" style="margin:0">Use o e-mail que a coordenação cadastrou.</p>
     ${iab?`<div class="banner" style="background:var(--post-soft);text-align:left"><span>Você abriu o app por dentro de outro aplicativo. Para entrar, abra o link no <b>${ios?'Safari':'Chrome'}</b>.</span></div>`:''}
-    <button class="primary big" data-act="login">Entrar com Google</button></section>`);
+    ${ios?pw+or+google:google+or+pw}
+    <p class="note-ex" style="margin:0;text-align:left">${ios?'No iPhone, o login com e-mail e senha é o mais confiável. Se o Google mostrar uma tela de erro em inglês, use e-mail e senha.':'Se o login com Google não funcionar, use e-mail e senha.'} No primeiro acesso, toque em <b>Primeiro acesso: criar senha</b> e confirme pelo link que chega no seu e-mail.</p></section>`);
+}
+function showVerify(){
+  screen(`<section class="panel stack" style="max-width:520px;width:100%;margin:40px auto 0">
+    <h2>Confirme seu e-mail</h2>
+    <p style="margin:0">Enviamos um link de confirmação para <b>${esc(S.email)}</b>. Abra seu e-mail (veja também a caixa de spam), toque no link e depois volte aqui.</p>
+    <div class="row"><button class="primary" data-act="pwcheck">Já confirmei</button><button data-act="pwresend">Reenviar e-mail</button></div>
+    <div><button class="ghost" data-act="logout">Sair</button></div></section>`);
 }
 function showNoAccess(){
   screen(`<section class="panel stack" style="max-width:520px;width:100%;margin:40px auto 0">
@@ -1015,17 +1079,21 @@ function boot(){
   try{ fs.enablePersistence({synchronizeTabs:true}).catch(()=>{}); }catch(e){}
   S.fs=fs; S.db=adapter(fs);
   const auth=firebase.auth();
-  auth.onAuthStateChanged(async u=>{
-    stopAll(); S.ready=false; S.marks={}; S.isCoord=false; S.memberRes=null;
-    if(!u){ S.user=null; S.email=null; showLogin(); return; }
-    S.user=u; S.email=(u.email||'').toLowerCase();
-    screen('<div class="panel"><p class="muted" style="margin:0">Carregando a escala…</p></div>');
-    try{ S.isCoord=(await fs.doc('coordinators/'+S.email).get()).exists; }catch(e){ S.isCoord=false; }
-    try{ const m=await fs.doc('members/'+S.email).get(); S.memberRes=m.exists?(m.data().residentId||null):null; }catch(e){ S.memberRes=null; }
-    if(!S.isCoord && !S.memberRes){ showNoAccess(); return; }
-    S.tab='escala'; S.seg = S.memberRes ? 'todos' : 'todos';
-    startData();
-  });
+  try{ auth.languageCode='pt'; }catch(e){}
+  auth.onAuthStateChanged(u=>handleUser(u));
+}
+async function handleUser(u){
+  const fs=S.fs;
+  stopAll(); S.ready=false; S.marks={}; S.isCoord=false; S.memberRes=null;
+  if(!u){ S.user=null; S.email=null; showLogin(); return; }
+  S.user=u; S.email=(u.email||'').toLowerCase();
+  if(!u.emailVerified && (u.providerData||[]).some(p=>p.providerId==='password')){ showVerify(); return; }
+  screen('<div class="panel"><p class="muted" style="margin:0">Carregando a escala…</p></div>');
+  try{ S.isCoord=(await fs.doc('coordinators/'+S.email).get()).exists; }catch(e){ S.isCoord=false; }
+  try{ const m=await fs.doc('members/'+S.email).get(); S.memberRes=m.exists?(m.data().residentId||null):null; }catch(e){ S.memberRes=null; }
+  if(!S.isCoord && !S.memberRes){ showNoAccess(); return; }
+  S.tab='escala'; S.seg='todos';
+  startData();
 }
 boot();
 
