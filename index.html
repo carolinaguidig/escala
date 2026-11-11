@@ -186,6 +186,36 @@ nav.bottom .badge{position:absolute;top:2px;left:calc(50% + 6px);background:var(
 .hchips button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .orline{display:flex;align-items:center;gap:10px;width:100%;color:var(--muted);font-size:.85rem}
 .orline::before,.orline::after{content:"";flex:1;border-top:1px solid var(--line)}
+/* painel da coordenação */
+.chip.miss b{color:var(--bad)}
+.pload{flex-wrap:nowrap;padding:8px 0}
+.pload .pn{flex:0 1 46%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.92rem}
+.pload .meter{flex:1 1 auto;min-width:40px}
+.pload .ph{flex:none;width:58px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
+.pload .ph.hot{color:var(--bad)}
+.ptable-wrap{overflow-x:auto;margin-inline:-4px}
+.ptable{border-collapse:collapse;width:100%;font-size:.86rem;font-variant-numeric:tabular-nums}
+.ptable th,.ptable td{padding:8px 8px;text-align:right;border-top:1px solid var(--line);white-space:nowrap}
+.ptable th{font-size:.74rem;font-weight:600;color:var(--muted);white-space:normal;vertical-align:bottom;min-width:58px;border-top:0}
+.ptable .n{text-align:left;position:sticky;left:0;background:var(--panel);font-weight:600;max-width:150px;overflow:hidden;text-overflow:ellipsis}
+.ptable tr.yg td{font-size:.74rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding-top:12px}
+.ptable .xt{color:var(--bad)}
+/* gerenciar em seções */
+.mseg{grid-template-columns:repeat(5,1fr);position:sticky;top:calc(env(safe-area-inset-top,0px) + 56px);z-index:3;background:var(--bg);padding:6px 0;margin-top:-6px}
+.mseg button{min-height:42px;font-size:clamp(.72rem,3.1vw,.95rem);padding:8px 1px;position:relative}
+.mbadge{position:absolute;top:-6px;right:-2px;background:var(--post);color:#fff;border-radius:99px;font-size:.66rem;font-weight:700;padding:1px 6px;line-height:1.4}
+button.li{width:100%;border:0;border-top:1px solid var(--line);border-radius:0;background:none;padding:10px 0;font:inherit;color:inherit;text-align:left;justify-content:flex-start;flex-wrap:nowrap;gap:12px;cursor:pointer}
+.list>button.li:first-child{border-top:0}
+.mrow .l{flex:1 1 auto}
+.mrow .av{width:40px;height:40px;font-size:.85rem}
+.chev{color:var(--muted);font-size:1.5rem;line-height:1;flex:none}
+.mgrp .ygrp{margin:10px 0 0}
+.minfo{display:grid;gap:6px;font-size:.88rem}
+.rline{padding:7px 0;font-size:.92rem;flex-wrap:nowrap}
+.rline b{text-align:right;font-weight:600}
+.hcard h2{margin-top:2px}
+.wsbox{border-top:1px solid var(--line);padding-top:8px}
+.wsnote{font-size:.86rem;background:var(--post-soft);border-radius:10px;padding:8px 10px}
 
 </style>
 </head>
@@ -205,7 +235,7 @@ nav.bottom .badge{position:absolute;top:2px;left:calc(50% + 6px);background:var(
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="config.js?v=20261028-0747"></script>
-<script src="app.js?v=20261028-0747"></script>
+<script src="config.js?v=20261111-1849"></script>
+<script src="app.js?v=20261111-1849"></script>
 </body>
 </html>

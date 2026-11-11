@@ -1,4 +1,4 @@
-const APP_VERSION='20261028-0747';
+const APP_VERSION='20261111-1849';
 
 (() => {
 const S = {
@@ -26,7 +26,7 @@ function locate(){
       {enableHighAccuracy:true, timeout:20000, maximumAge:0});
   });
 }
-function modal(inner){ document.getElementById('modal').innerHTML=`<div class="overlay" data-act="close"><div class="sheet" role="dialog" aria-modal="true">${inner}</div></div>`; }
+function modal(inner){ S.sheet=null; document.getElementById('modal').innerHTML=`<div class="overlay" data-act="close"><div class="sheet" role="dialog" aria-modal="true">${inner}</div></div>`; }
 function sheetMsg(text){ modal(`<p style="margin:0">${text}</p>`); }
 const mapLink=(lat,lng)=>`<a href="https://www.google.com/maps?q=${lat},${lng}" target="_blank" rel="noopener">Conferir no mapa</a>`;
 
@@ -316,7 +316,7 @@ const DEFAULT_OFF={0:0,1:1,2:1,3:1,4:1,5:3,6:0};
 function ruleSets(){ const sets=S.config.pos?.sets; return Array.isArray(sets)&&sets.length?sets:[{from:'2000-01-01',offsets:DEFAULT_OFF}]; }
 function ruleFor(date){ const all=ruleSets().slice().sort((a,b)=>a.from.localeCompare(b.from)); return all.filter(x=>x.from<=date).pop() || all[0]; }
 function crosses(s){ return isoDate(times(s).b)!==s.date; }
-function postDate(s){ const r=ruleFor(s.date), wd=parseD(s.date).getDay(); const o=Number((crosses(s)?r.offsets:r.dayOffsets)?.[wd] ?? 0); if(!o) return null; return addDays(s.date, Math.min(7,Math.max(1,o))); }
+function rulePostDate(s){ if(weekendBlocked(s)) return null; const r=ruleFor(s.date), wd=parseD(s.date).getDay(); const o=Number((crosses(s)?r.offsets:r.dayOffsets)?.[wd] ?? 0); if(!o) return null; return addDays(s.date, Math.min(7,Math.max(1,o))); }
 function postOn(day, shifts){ return shifts.filter(s=>postDate(s)===day); }
 function postLabel(wd,o){ if(!o) return 'não gera'; return WDL[(wd+o)%7] + (o===1?' (dia seguinte)':o>=7?' (uma semana depois)':wd+o>6?' da semana seguinte':''); }
 function compOn(day){ return allRequests().filter(r=>r.status==='aprovado' && r.compDate===day); }
@@ -344,7 +344,7 @@ const ICON={
 function tabsList(){
   const pend = allRequests().filter(r=>r.status==='pendente').length;
   const t=[['escala','Escala']];
-  if (S.isCoord) t.push(['comp','Compensações', pend], ['gerenciar','Gerenciar']);
+  if (S.isCoord) t.push(['painel','Painel'], ['comp','Compensações', pend], ['gerenciar','Gerenciar']);
   return t;
 }
 function renderTabs(){
@@ -357,7 +357,7 @@ function renderTabs(){
     title.innerHTML=`<button data-act="week" data-n="-1" aria-label="${S.monthOpen?'Mês anterior':'Semana anterior'}">‹</button><span>${MON[d.getMonth()]}${d.getFullYear()!==new Date().getFullYear()?' '+d.getFullYear():''}</span><button data-act="week" data-n="1" aria-label="${S.monthOpen?'Próximo mês':'Próxima semana'}">›</button>`;
     right.innerHTML=`<button class="todaybtn" data-act="today" aria-label="Ir para hoje"><svg viewBox="0 0 44 44" width="40" height="40" fill="none"><rect x="6" y="8" width="32" height="30" rx="5" stroke="currentColor" stroke-width="2"/><path d="M6 15h32" stroke="currentColor" stroke-width="2"/><path d="M14 5v6M30 5v6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><text x="22" y="28" text-anchor="middle" font-size="8.5" font-weight="700" fill="currentColor" font-family="-apple-system,Segoe UI,Roboto,sans-serif">HOJE</text><circle cx="22" cy="33" r="1.4" fill="currentColor"/></svg></button>`;
   } else {
-    title.textContent={comp:'Compensações',gerenciar:'Gerenciar escala'}[S.tab]||'Escala';
+    title.textContent={painel:'Painel da coordenação',comp:'Compensações',gerenciar:'Gerenciar escala'}[S.tab]||'Escala';
     right.innerHTML='';
   }
 }
@@ -376,8 +376,9 @@ function render(){
   S.pending=false;
   renderTabs(); renderWho();
   if (!S.ready) return;
-  const fn=(S.isCoord?{escala:viewEscala, comp:viewComp, gerenciar:viewGerenciar}:{escala:viewEscala})[S.tab]||viewEscala;
+  const fn=(S.isCoord?{escala:viewEscala, painel:viewPainel, comp:viewComp, gerenciar:viewGerenciar}:{escala:viewEscala})[S.tab]||viewEscala;
   v.innerHTML = fn();
+  if(S.sheet && S.sheetRefresh){ S.sheetRefresh=false; refreshSheet(); }
 }
 
 function linkBanner(){ return ''; }
@@ -478,8 +479,8 @@ function segMeus(){
 }
 function segPos(shifts){
   const day=S.date;
-  const items=postOn(day,shifts).map(s=>`<div class="li"><span class="row" style="flex-wrap:nowrap;min-width:0">${avatar(s.residentId)}<span class="l"><b>${esc(resName(s.residentId))}</b><span class="muted" style="font-size:.86rem">${esc(s.label||'Plantão')} de ${WD[parseD(s.date).getDay()]}, ${fmtShort(s.date)} · ${esc(S.hospitals[s.hospitalId]?.short||hospName(s.hospitalId))} ${s.start}–${s.end}</span></span></span><span class="pill p-post">Pós-plantão</span></div>`);
-  return `${dayHeader(day, `${items.length} residente${items.length===1?'':'s'}`)}<section class="panel" id="pos-plantao"><div class="list">${items.length?items.join(''):'<div class="empty">Ninguém em pós-plantão neste dia.</div>'}</div><p class="note-ex" style="margin:8px 0 0">Calculado pela regra de pós-plantão da coordenação, que separa diurno e noturno no fim de semana.</p></section>`;
+  const items=postOn(day,shifts).map(s=>`<div class="li"><span class="row" style="flex-wrap:nowrap;min-width:0">${avatar(s.residentId)}<span class="l"><b>${esc(resName(s.residentId))}</b><span class="muted" style="font-size:.86rem">${esc(s.label||'Plantão')} de ${WD[parseD(s.date).getDay()]}, ${fmtShort(s.date)} · ${esc(S.hospitals[s.hospitalId]?.short||hospName(s.hospitalId))} ${s.start}–${s.end}</span></span></span><span class="row" style="gap:6px">${S.isCoord&&hasPostEdit(s)?'<span class="pill p-wait">ajustado</span>':''}<span class="pill p-post">Pós-plantão</span>${S.isCoord?`<button class="ghost" data-act="editpos" data-id="${esc(s.id)}">Editar</button>`:''}</span></div>`);
+  return `${dayHeader(day, `${items.length} residente${items.length===1?'':'s'}`)}<section class="panel" id="pos-plantao"><div class="list">${items.length?items.join(''):'<div class="empty">Ninguém em pós-plantão neste dia.</div>'}</div><p class="note-ex" style="margin:8px 0 0">Calculado pela regra de pós-plantão da coordenação, que separa diurno e noturno no fim de semana${S.isCoord?'. Para mudar só um caso, toque em Editar: a regra padrão não muda':''}.</p></section>${posMovedAway(day)}`;
 }
 function exampleNote(){ return ''; }
 
@@ -574,52 +575,6 @@ function viewFerias(){
   </section>`;
 }
 
-function viewGerenciar(){
-  if (!S.isCoord) return viewEscala();
-  const d=S.manageDate, idx=checkIndex();
-  const list=allShifts().filter(s=>s.date===d);
-  const resOpts=resOptions((id,r)=>esc(r.name)+(onVac(id,d)?' · férias':''));
-  const hList=Object.entries(S.hospitals).sort((a,b)=>a[1].name.localeCompare(b[1].name));
-  const selH=S.hospitals[S.form.hosp]?S.form.hosp:(hList[0]?.[0]||'');
-  const selSt=S.stages[S.form.stage]?.hospitalId===selH?S.form.stage:'';
-  const hOpts=hList.map(([id,h])=>`<option value="${id}" ${id===selH?'selected':''}>${esc(h.name)}</option>`).join('');
-  const posts=new Set(postOn(d, allShifts()).map(s=>s.residentId));
-  const rows=list.map(s=>`<div class="li"><span class="l"><b>${esc(resName(s.residentId))}</b><span class="muted" style="font-size:.88rem">${esc(hospName(s.hospitalId))}${S.stages[s.stageId]?' · '+esc(S.stages[s.stageId].name):''} · <span class="time">${s.start}–${s.end}</span> · ${esc(s.label||'')}${idx[s.id]?.in?' · com check-in':''}${s.batch&&s.until?` · período até ${fmtShort(s.until)}`:''}</span></span><span class="row" style="gap:4px"><button class="ghost" data-act="delshift" data-id="${s.id}" data-m="${s.month}">${s.batch?'Remover só este dia':'Remover'}</button>${s.batch?`<button class="ghost" style="color:var(--bad)" data-act="delbatch" data-b="${esc(s.batch)}" data-from="${s.date}">Remover daqui até o fim</button>`:''}</span></div>`).join('');
-  const yrs=['ME1','ME2','ME3'];
-  const resRows=resByYear().map(([y,list])=>`<h3 class="ygrp">${esc(y)} · ${list.length} residente${list.length===1?'':'s'}</h3>`+list.map(([id,r])=>`<div class="li edit"><input id="rn-${esc(id)}" type="text" value="${esc(r.name)}" aria-label="Nome" style="flex:1 1 180px"><select id="ry-${esc(id)}" aria-label="Ano">${yrs.map(y=>`<option ${y===r.year?'selected':''}>${y}</option>`).join('')}</select><input id="rem-${esc(id)}" type="email" value="${esc(emailOf(id))}" placeholder="e-mail Google" aria-label="E-mail" style="flex:1 1 200px"><span class="row" style="gap:4px"><button class="ghost" data-act="saveres" data-id="${esc(id)}">Salvar</button><button class="ghost" style="color:var(--bad)" data-act="delres" data-id="${esc(id)}">Remover</button></span></div>`).join('')).join('');
-  const hRows=Object.entries(S.hospitals).map(([id,h])=>`<div class="li edit"><input id="hn-${esc(id)}" type="text" value="${esc(h.name)}" aria-label="Nome do hospital" style="flex:1 1 200px"><input id="hs-${esc(id)}" type="text" value="${esc(h.short||'')}" maxlength="6" aria-label="Sigla" style="width:84px"><span class="row" style="gap:4px"><button class="ghost" data-act="geo" data-id="${esc(id)}">${h.geo?`Local: ${fmtDist(h.geo.radius)}`:'Definir local'}</button><button class="ghost" data-act="savehosp" data-id="${esc(id)}">Salvar</button><button class="ghost" style="color:var(--bad)" data-act="delhosp" data-id="${esc(id)}">Remover</button></span></div>`).join('');
-  const pc=posConflicts();
-  const pcHtml = pc.length ? `<section class="banner" id="conflitos-pos" style="background:var(--post-soft)"><div><b>${pc.length} dia${pc.length===1?'':'s'} de estágio ca${pc.length===1?'i':'em'} em pós-plantão</b><div class="muted" style="font-size:.86rem">${pc.slice(0,6).map(s=>`${esc(resName(s.residentId))} em ${fmtShort(s.date)}`).join(' · ')}${pc.length>6?' …':''}</div></div><button class="primary" data-act="fixpos">Retirar do estágio nesses dias</button></section>` : '';
-  return `${pcHtml}<section class="panel stack" id="escala-dia"><div class="row between"><h2>Escala do dia</h2><div class="datebar"><button aria-label="Dia anterior" data-act="mday" data-n="-1">‹</button><input type="date" id="mDay" value="${d}" aria-label="Data"><button aria-label="Próximo dia" data-act="mday" data-n="1">›</button></div></div>
-    <div class="list">${rows||'<div class="empty">Nenhum plantão neste dia.</div>'}</div>
-    <h3>Adicionar plantão em ${fmtDay(d)}</h3>
-    <div class="form"><label class="f">Hospital<select id="sHosp">${hOpts}</select></label>
-      <label class="f">Estágio<select id="sStage">${stageOpts(selH,selSt)}</select></label>
-      <label class="f">Residente<select id="sRes">${resOptsFor(selSt,d)}</select></label>
-      <label class="f">Início<input type="time" id="sStart" value="07:00"></label>
-      <label class="f">Fim<input type="time" id="sEnd" value="19:00"></label>
-      <label class="f">Tipo<select id="sLabel"><option>Diurno 12h</option><option>Noturno 12h</option><option>Plantão 24h</option><option>Manhã 6h</option><option>Tarde 6h</option><option>Estágio</option></select></label>
-      <label class="f">Repetir até (opcional)<input type="date" id="sUntil" min="${d}" value="${esc(S.form.until&&S.form.until>d?S.form.until:'')}"></label></div>
-    <div id="sDaysWrap" class="stack" style="gap:6px" ${S.form.until&&S.form.until>d?'':'hidden'}><span class="f-lab">Dias da semana no período</span><div class="wdays" id="sDays">${[1,2,3,4,5,6,0].map(w=>`<label class="wd"><input type="checkbox" value="${w}" ${(S.form.days||[]).includes(w)?'checked':''}> ${WD[w]}</label>`).join('')}</div><span class="muted" style="font-size:.82rem">Cria um lançamento por dia marcado, de ${fmtShort(d)} até a data final. Dias de férias ou de pós-plantão do residente são pulados.</span></div>
-    <div><button class="primary" data-act="addshift">Adicionar</button></div>
-    ${posts.size?`<div class="muted" style="font-size:.85rem">Em pós-plantão neste dia: ${[...posts].map(r=>esc(resName(r))).join(', ')}.</div>`:''}
-  </section>
-  <section class="two">
-    <div class="panel stack" id="residentes"><h2>Residentes</h2><div class="list">${resRows}</div>
-      <div class="form"><label class="f">Nome<input id="rName" type="text"></label><label class="f">Ano<select id="rYear"><option>ME1</option><option>ME2</option><option>ME3</option></select></label><label class="f">E-mail Google<input id="rEmail" type="email"></label><button class="primary" data-act="addres">Adicionar</button></div>
-      <details><summary class="sumx">Adicionar vários de uma vez</summary><div class="stack" style="margin-top:8px"><label class="f">Um por linha: Nome;Ano;e-mail<textarea id="rBulk" placeholder="Maria Souza;ME1;maria@gmail.com"></textarea></label><div><button data-act="bulkres">Adicionar lista</button></div></div></details></div>
-    <div class="stack">
-      <div class="panel stack" id="hospitais-cad"><h2>Hospitais</h2><div class="list">${hRows}</div>
-        <div class="form"><label class="f">Nome<input id="hName" type="text"></label><label class="f">Sigla<input id="hShort" type="text" maxlength="6"></label><button class="primary" data-act="addhosp">Adicionar</button></div></div>
-      ${accessPanel()}
-    </div>
-  </section>
-  ${flaggedPanel()}
-  ${coordSwapsPanel()}
-  ${stagesPanel()}
-  ${rulesPanel()}
-  ${importPanel()}`;
-}
 const rankY=y=>{ const i=YEARS.indexOf(y); return i<0?99:i; };
 function stagesOf(hid){ return Object.entries(S.stages).filter(([,x])=>x.hospitalId===hid).sort((a,b)=>rankY(a[1].year)-rankY(b[1].year)||a[1].name.localeCompare(b[1].name,'pt-BR',{numeric:true})); }
 function assignsOn(stid, day){ return Object.entries(S.stageAssign).filter(([,a])=>a.stageId===stid && a.start<=day && (!a.end || day<=a.end)).sort((a,b)=>resName(a[1].residentId).localeCompare(resName(b[1].residentId),'pt-BR')); }
@@ -672,7 +627,7 @@ function rulesPanel(){
   const cur=ruleFor(today());
   const order=[['n',1],['n',2],['n',3],['n',4],['n',5],['d',6],['n',6],['d',0],['n',0]];
   const blocks=sets.map(x=>`<div class="rule"><div class="row between"><label class="f">Válida para plantões a partir de<input type="date" id="pf-${x.i}" value="${esc(x.from)}"></label><span class="row" style="gap:6px">${x.from===cur.from?'<span class="pill p-done">Em vigor hoje</span>':(x.from>today()?'<span class="pill p-wait">Futura</span>':'')}${sets.length>1?`<button class="ghost" style="color:var(--bad)" data-act="delrule" data-i="${x.i}">Remover</button>`:''}</span></div>
-    <div class="rulegrid">${order.map(([k,wd])=>{ const o=Number((k==='d'?x.dayOffsets:x.offsets)?.[wd] ?? 0); return `<label class="f">${k==='d'?'Diurno':'Noturno'} de ${WDL[wd]}<select id="po-${x.i}-${k}${wd}">${[0,1,2,3,4,5,6,7].map(n=>`<option value="${n}" ${n===o?'selected':''}>Pós-plantão: ${postLabel(wd,n)}</option>`).join('')}</select></label>`; }).join('')}</div></div>`).join('');
+    <div class="rulegrid">${order.map(([k,wd])=>{ const o=Number((k==='d'?x.dayOffsets:x.offsets)?.[wd] ?? 0); return `<label class="f">${k==='d'?'Diurno':'Noturno'} de ${WDL[wd]}<select id="po-${x.i}-${k}${wd}">${[0,1,2,3,4,5,6,7].map(n=>`<option value="${n}" ${n===o?'selected':''}>Pós-plantão: ${postLabel(wd,n)}</option>`).join('')}</select></label>`; }).join('')}</div>${wsPicker(x)}</div>`).join('');
   const [y,m]=today().split('-').map(Number); const nextStart = `${m>=3?y+1:y}-03-01`;
   return `<section class="panel stack" id="regras-pos"><div class="sec-title"><h2>Regras de pós-plantão</h2><button class="primary" data-act="saverules">Salvar regras</button></div>
     <div class="muted" style="font-size:.88rem">Noturno vale para plantões que viram a noite (inclui o de 24h); diurno, para os que terminam no mesmo dia. O pós-plantão aparece sozinho assim que o residente é escalado. Para um novo ano, crie uma regra com a data de início: plantões antes dela seguem a regra anterior.</div>
@@ -707,7 +662,7 @@ function openAsk(shiftId){
   document.getElementById('qDate').addEventListener('change',checkDate);
   fill();
 }
-function closeModal(){ document.getElementById('modal').innerHTML=''; if(S.pending) render(); }
+function closeModal(){ S.sheet=null; document.getElementById('modal').innerHTML=''; if(S.pending) render(); }
 
 // ---------- writes ----------
 const isStageEntry = s => !crosses(s) && !!(s.stageId || s.batch || s.label==='Estágio');
@@ -740,7 +695,7 @@ async function guard(fn, okMsg){
   S.busy=true;
   try { await fn(); if(okMsg) toast(okMsg); }
   catch(e){ console.error(e); toast(e?.code==='permission-denied'?'O servidor recusou esta ação. Confira se você está no local ou se tem permissão.':e?.code==='unavailable'?'Sem internet. Tente de novo quando a conexão voltar.':'Não foi possível salvar. Tente de novo.'); }
-  finally { S.busy=false; render(); }
+  finally { S.busy=false; S.sheetRefresh=true; render(); }
 }
 async function setShift(month, id, data){
   const ref=S.db.doc('schedule/'+month); const cur=S.schedule[month];
@@ -805,12 +760,12 @@ const actions = {
       (pd?`Plantão adicionado · pós-plantão em ${fmtDay(pd)}`:'Plantão adicionado') + (stageOut.length?` · retirado do estágio nesse dia`:'')); },
   async fixpos(){ const c=posConflicts(); if(!c.length) return; await guard(()=>removeShifts(c), `${c.length} dia${c.length===1?'':'s'} de estágio retirado${c.length===1?'':'s'} por pós-plantão`); },
   async saverules(){
-    const sets=ruleSets().map((x,i)=>{ const offsets={}, dayOffsets={}; for(let wd=0;wd<7;wd++){ const en=document.getElementById(`po-${i}-n${wd}`); offsets[wd]=en?Number(en.value):Number(x.offsets?.[wd] ?? 0); const ed=document.getElementById(`po-${i}-d${wd}`); dayOffsets[wd]=ed?Number(ed.value):Number(x.dayOffsets?.[wd] ?? 0); } const f=document.getElementById(`pf-${i}`); return {...x, from:(f&&f.value)||x.from, offsets, dayOffsets}; });
+    const sets=ruleSets().map((x,i)=>{ const offsets={}, dayOffsets={}; for(let wd=0;wd<7;wd++){ const en=document.getElementById(`po-${i}-n${wd}`); offsets[wd]=en?Number(en.value):Number(x.offsets?.[wd] ?? 0); const ed=document.getElementById(`po-${i}-d${wd}`); dayOffsets[wd]=ed?Number(ed.value):Number(x.dayOffsets?.[wd] ?? 0); } const f=document.getElementById(`pf-${i}`); return {...x, from:(f&&f.value)||x.from, offsets, dayOffsets, weekendStages:readWS(i, x)}; });
     const froms=sets.map(x=>x.from); if(new Set(froms).size!==froms.length){ toast('Duas regras com a mesma data de início. Ajuste uma delas.'); return; }
     await guard(()=>S.db.doc('config/pos').set({sets}), 'Regras salvas'); },
   async addrule(){ const f=document.getElementById('pfNew').value; if(!f){ toast('Escolha a data de início.'); return; }
     if(ruleSets().some(x=>x.from===f)){ toast('Já existe uma regra com essa data.'); return; }
-    const base=ruleFor(f); const sets=[...ruleSets(), {from:f, offsets:{...base.offsets}, dayOffsets:{...(base.dayOffsets||{})}}];
+    const base=ruleFor(f); const sets=[...ruleSets(), {from:f, offsets:{...base.offsets}, dayOffsets:{...(base.dayOffsets||{})}, weekendStages:[...(base.weekendStages||[])]}];
     await guard(()=>S.db.doc('config/pos').set({sets}), 'Regra criada. Ajuste os dias e salve.'); },
   async delrule(el){ if(!el_confirm('rule'+el.dataset.i)){ toast('Clique de novo em Remover para confirmar.'); return; }
     const sets=ruleSets().filter((x,i)=>i!==+el.dataset.i); await guard(()=>S.db.doc('config/pos').set({sets}), 'Regra removida'); },
@@ -980,10 +935,394 @@ document.addEventListener('change', ev=>{
 });
 document.addEventListener('focusout', ()=>{ setTimeout(()=>{ if(S.pending && !document.getElementById('view').contains(document.activeElement)) render(); }, 50); });
 document.addEventListener('keydown', ev=>{ if(ev.key==='Escape' && document.getElementById('modal').innerHTML) closeModal(); });
-setInterval(()=>{ if(S.tab==='escala') render(); }, 60000);
+setInterval(()=>{ if(S.tab==='escala'||S.tab==='painel') render(); }, 60000);
 let touchX=null;
 document.addEventListener('touchstart', e=>{ touchX = e.target.closest('#strip') ? e.touches[0].clientX : null; }, {passive:true});
 document.addEventListener('touchend', e=>{ if(touchX==null) return; const dx=e.changedTouches[0].clientX-touchX; touchX=null; if(Math.abs(dx)>60) actions.week({dataset:{n: dx<0?1:-1}}); });
+
+// ---------- Painel da coordenação ----------
+ICON.painel='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M8 16v-4M12 16V8M16 16v-6"/></svg>';
+S.pMonth=today().slice(0,7); S.pWeek=today();
+const pLoaded=new Set();
+// Registros de check-in do mês inteiro (só a coordenação pode ler todos).
+function painelMarks(months){
+  for (const m of months){
+    const k='m|'+m; if(markL[k]) continue;
+    pLoaded.delete(m);
+    markL[k]=S.fs.collection(`checkins/${m}/marks`).onSnapshot(snap=>{
+      snap.docChanges().forEach(ch=>{ if(ch.type==='removed') delete S.marks[ch.doc.id]; else S.marks[ch.doc.id]=normMark(ch.doc); });
+      pLoaded.add(m); render();
+    }, err=>{ console.error('marks', m, err); pLoaded.add(m); render(); });
+  }
+  return months.every(m=>pLoaded.has(m));
+}
+const pNum = n => `<b>${n}</b>`;
+const pH = m => m ? fmtDur(m) : '0h';
+function pList(items, empty){ return `<div class="list">${items.length?items.join(''):`<div class="empty">${empty}</div>`}</div>`; }
+function pPerson(rid, sub, right=''){ return `<div class="li"><span class="row" style="flex-wrap:nowrap;min-width:0;gap:10px">${avatar(rid)}<span class="l"><b>${esc(resName(rid))} <span class="yr">${esc(S.residents[rid]?.year||'')}</span></b><span class="muted" style="font-size:.85rem">${sub}</span></span></span>${right}</div>`; }
+const hShort = id => esc(S.hospitals[id]?.short||hospName(id));
+
+function viewPainel(){
+  if(!S.isCoord) return viewEscala();
+  const td=today(), now=new Date(), idx=checkIndex(), shifts=allShifts();
+  const [wa,wb]=weekRange(S.pWeek);
+  const ready=painelMarks([...new Set([td.slice(0,7), addDays(td,-1).slice(0,7), S.pMonth, wa.slice(0,7), wb.slice(0,7)])]);
+  const wait = ready ? '' : '<div class="banner" style="background:var(--panel)"><span class="muted">Carregando os registros de check-in…</span></div>';
+
+  // ----- hoje -----
+  const recent=shifts.filter(s=>s.date>=addDays(td,-1) && s.date<=td);
+  const onNow=recent.filter(s=>idx[s.id]?.in && !idx[s.id]?.out).sort((a,b)=>hospName(a.hospitalId).localeCompare(hospName(b.hospitalId)));
+  const noIn=recent.filter(s=>{ const t=times(s); return !idx[s.id]?.in && now>new Date(t.a.getTime()+30*60000) && now<=t.b; });
+  const posts=postOn(td,shifts);
+  const vacs=Object.values(S.vacations).filter(v=>v.start<=td && td<=v.end).sort((a,b)=>resName(a.residentId).localeCompare(resName(b.residentId),'pt-BR'));
+  const comps=compOn(td);
+  const todayN=shifts.filter(s=>s.date===td).length;
+  const hoje=`<section class="stack" id="p-hoje"><div class="sec-title"><h2>Hoje</h2><span class="muted">${fmtDay(td)} · ${todayN} ${todayN===1?'plantão':'plantões'} na escala</span></div>
+    <div class="chips"><div class="chip on">${pNum(onNow.length)}<span>em plantão agora</span></div><div class="chip miss">${pNum(noIn.length)}<span>sem check-in</span></div><div class="chip post">${pNum(posts.length)}<span>em pós-plantão</span></div><div class="chip vac">${pNum(vacs.length)}<span>de férias</span></div>${comps.length?`<div class="chip comp">${pNum(comps.length)}<span>em folga compensatória</span></div>`:''}</div>
+    <div class="two">
+      <div class="panel"><h3>Em plantão agora</h3>${pList(onNow.map(s=>pPerson(s.residentId, `${hShort(s.hospitalId)}${S.stages[s.stageId]?' · '+esc(S.stages[s.stageId].name):''} · desde ${hm(new Date(idx[s.id].in))}`, idx[s.id].flag?'<span class="pill p-post">fora da área</span>':'')), 'Ninguém com check-in aberto.')}</div>
+      <div class="panel"><h3>Sem check-in</h3><div class="muted" style="font-size:.82rem">Plantão começou há mais de 30 min e o residente ainda não registrou.</div>${pList(noIn.map(s=>pPerson(s.residentId, `${hShort(s.hospitalId)} · <span class="time">${s.start}–${s.end}</span>`, '<span class="pill p-miss">sem check-in</span>')), 'Todos os plantões em andamento têm check-in.')}</div>
+      <div class="panel"><h3>Pós-plantão</h3>${pList(posts.map(s=>pPerson(s.residentId, `${esc(s.label||'Plantão')} de ${WD[parseD(s.date).getDay()]}, ${fmtShort(s.date)} · ${hShort(s.hospitalId)}`)), 'Ninguém em pós-plantão hoje.')}</div>
+      <div class="panel"><h3>Férias e folgas</h3>${pList([...vacs.map(v=>pPerson(v.residentId, `Férias de ${fmtShort(v.start)} a ${fmtShort(v.end)}`, '<span class="pill p-vac">férias</span>')), ...comps.map(r=>pPerson(r.residentId, `Folga compensatória${r.compPeriod?' · '+esc(r.compPeriod):''}`, '<span class="pill p-done">folga</span>'))], 'Ninguém de férias ou de folga hoje.')}</div>
+    </div></section>`;
+
+  // ----- pendências -----
+  const pendReq=allRequests().filter(q=>q.status==='pendente');
+  const pendSw=swapsList().filter(x=>x.status==='pendente');
+  const flagged=Object.values(S.marks).filter(m=>m.flag && !m.review);
+  const shById={}; shifts.forEach(s=>shById[s.id]=s);
+  const noOut=Object.entries(S.marks).filter(([sid,m])=>{ const s=shById[sid]; return s && m.in && !m.out && now>new Date(times(s).b.getTime()+2*3600e3); }).map(([sid])=>shById[sid]).sort((a,b)=>b.date.localeCompare(a.date));
+  const pend=[];
+  if(pendReq.length) pend.push(`<div class="li"><span class="l"><b>${pendReq.length} pedido${pendReq.length===1?'':'s'} de compensação</b><span class="muted" style="font-size:.85rem">aguardando sua decisão · ${pH(pendReq.reduce((t,q)=>t+(q.minutes||0),0))} no total</span></span><button class="primary" data-tab="comp">Decidir</button></div>`);
+  if(flagged.length) pend.push(`<div class="li"><span class="l"><b>${flagged.length} registro${flagged.length===1?'':'s'} fora da área</b><span class="muted" style="font-size:.85rem">check-in ou checkout longe do hospital, para aceitar ou recusar</span></span><button data-act="pgo" data-tab2="gerenciar" data-to="fora-da-area">Revisar</button></div>`);
+  if(noOut.length) pend.push(`<div class="li"><span class="l"><b>${noOut.length} ${noOut.length===1?'plantão':'plantões'} sem checkout</b><span class="muted" style="font-size:.85rem">${noOut.slice(0,4).map(s=>`${esc(firstName(s.residentId))} ${fmtShort(s.date)}`).join(', ')}${noOut.length>4?'…':''} · as horas extras desses plantões não entram na conta</span></span></div>`);
+  if(pendSw.length) pend.push(`<div class="li"><span class="l"><b>${pendSw.length} troca${pendSw.length===1?'':'s'} esperando o colega</b><span class="muted" style="font-size:.85rem">quem resolve são os próprios residentes</span></span><button class="ghost" data-act="pgo" data-tab2="gerenciar" data-to="trocas-coord">Ver</button></div>`);
+  const pendH=`<section class="panel stack" id="p-pend"><h2>Pendências</h2>${pList(pend, 'Nada pendente.')}</section>`;
+
+  // ----- carga da semana -----
+  const wk=shifts.filter(s=>s.date>=wa && s.date<=wb);
+  const load={}; for (const s of wk){ load[s.residentId]=(load[s.residentId]||0)+(workedMins(s, idx[s.id]) ?? times(s).mins); }
+  const over=Object.values(load).filter(m=>m>MAX_WEEK_MIN).length;
+  const wkRows=resByYear().map(([y,list])=>`<h3 class="ygrp">${esc(y)}</h3>`+list.map(([id])=>{ const m=load[id]||0, hot=m>MAX_WEEK_MIN;
+    return `<div class="li pload"><span class="pn">${esc(resName(id))}</span><span class="meter ${hot?'hot':''}"><i style="width:${Math.min(100,m/MAX_WEEK_MIN*100)}%"></i></span><span class="ph ${hot?'hot':''}">${pH(m)}</span></div>`; }).join('')).join('');
+  const thisWeek=weekRange(td)[0]===wa;
+  const semana=`<section class="panel stack" id="p-semana"><div class="sec-title"><h2>Carga da semana</h2><div class="datebar"><button aria-label="Semana anterior" data-act="pweek" data-n="-7">‹</button><span class="time">${fmtShort(wa)} a ${fmtShort(wb)}</span><button aria-label="Próxima semana" data-act="pweek" data-n="7">›</button>${thisWeek?'':'<button class="ghost" data-act="pweek" data-n="0">Esta semana</button>'}</div></div>
+    ${over?`<div class="warnline">${over} residente${over===1?' está':'s estão'} acima de 60h nesta semana.</div>`:''}
+    <div class="list">${wkRows||'<div class="empty">Nenhum residente cadastrado.</div>'}</div>
+    <div class="muted" style="font-size:.82rem">Segunda a domingo. Conta as horas reais dos plantões com checkout e as horas da escala dos demais. Limite de 60h semanais da Lei 6.932/81.</div></section>`;
+
+  // ----- mês -----
+  const pm=S.pMonth, [py,pmo]=pm.split('-').map(Number);
+  const ms=shifts.filter(s=>s.date.slice(0,7)===pm);
+  const ended=s=>times(s).b<=now;
+  const night=s=>crosses(s);
+  const reqs=allRequests();
+  const apprBy={}; reqs.filter(q=>q.status==='aprovado' && ((q.shiftDate||shById[q.shiftId]?.date||'').slice(0,7)===pm)).forEach(q=>apprBy[q.residentId]=(apprBy[q.residentId]||0)+(q.minutes||0));
+  const agg=key=>{ const o={}; for (const s of ms){ const k=s[key]; const a=o[k]=o[k]||{n:0,night:0,mins:0,extra:0,miss:0,flag:0}; const c=idx[s.id];
+    a.n++; if(night(s)) a.night++; a.mins+=workedMins(s,c) ?? times(s).mins; a.extra+=extraMins(s,c); if(ended(s) && !c?.in) a.miss++; if(c?.flag) a.flag++; } return o; };
+  const byH=agg('hospitalId'), byR=agg('residentId');
+  const tot=Object.values(byH).reduce((t,a)=>({n:t.n+a.n, extra:t.extra+a.extra, miss:t.miss+a.miss, mins:t.mins+a.mins}), {n:0,extra:0,miss:0,mins:0});
+  const apprTot=Object.values(apprBy).reduce((t,m)=>t+m,0);
+  const hRows=Object.entries(S.hospitals).sort((a,b)=>a[1].name.localeCompare(b[1].name)).filter(([id])=>byH[id]).map(([id,h])=>{ const a=byH[id];
+    return `<tr><td class="n" title="${esc(h.name)}">${esc(h.short||h.name)}</td><td>${a.n}</td><td>${a.night}</td><td>${a.extra?`<b class="xt">+${fmtDur(a.extra)}</b>`:'—'}</td><td>${a.miss||'—'}</td><td>${a.flag||'—'}</td></tr>`; }).join('');
+  const rRows=resByYear().map(([y,list])=>`<tr class="yg"><td class="n" colspan="7">${esc(y)}</td></tr>`+list.map(([id])=>{ const a=byR[id]||{n:0,night:0,mins:0,extra:0,miss:0};
+    return `<tr><td class="n">${esc(resName(id))}</td><td>${a.n||'—'}</td><td>${a.night||'—'}</td><td>${a.n?pH(a.mins):'—'}</td><td>${a.extra?`<b class="xt">+${fmtDur(a.extra)}</b>`:'—'}</td><td>${apprBy[id]?fmtDur(apprBy[id]):'—'}</td><td>${a.miss||'—'}</td></tr>`; }).join('')).join('');
+  const first=`${pm}-01`, last=`${pm}-${pad(new Date(py,pmo,0).getDate())}`;
+  const mVac=Object.values(S.vacations).filter(v=>v.start<=last && v.end>=first).sort((a,b)=>a.start.localeCompare(b.start));
+  const mes=`<section class="stack" id="p-mes"><div class="sec-title"><h2>Resumo do mês</h2><div class="datebar"><button aria-label="Mês anterior" data-act="pmonth" data-n="-1">‹</button><span class="d" style="font-size:1.05rem">${MON[pmo-1][0].toUpperCase()+MON[pmo-1].slice(1)} de ${py}</span><button aria-label="Próximo mês" data-act="pmonth" data-n="1">›</button></div></div>
+    <div class="chips"><div class="chip">${pNum(tot.n)}<span>plantões na escala</span></div><div class="chip miss">${pNum(tot.extra?'+'+fmtDur(tot.extra):'0h')}<span>horas extras registradas</span></div><div class="chip comp">${pNum(pH(apprTot))}<span>compensação autorizada</span></div><div class="chip">${pNum(tot.miss)}<span>plantões sem registro</span></div></div>
+    <div class="panel stack"><h3>Por hospital</h3>${hRows?`<div class="ptable-wrap"><table class="ptable"><thead><tr><th class="n">Hospital</th><th>Plantões</th><th>Noturnos</th><th>Horas extras</th><th>Sem registro</th><th>Fora da área</th></tr></thead><tbody>${hRows}</tbody></table></div>`:'<div class="empty">Nenhum plantão neste mês.</div>'}</div>
+    <div class="panel stack"><h3>Por residente</h3><div class="ptable-wrap"><table class="ptable"><thead><tr><th class="n">Residente</th><th>Plantões</th><th>Noturnos</th><th>Horas</th><th>Horas extras</th><th>Compensação autorizada</th><th>Sem registro</th></tr></thead><tbody>${rRows}</tbody></table></div>
+      <div class="muted" style="font-size:.82rem">Horas extras: tempo entre check-in e checkout além do horário da escala. “Sem registro”: plantões já encerrados sem check-in. Compensação autorizada conta os pedidos aprovados dos plantões deste mês.</div></div>
+    <div class="panel"><h3>Férias no mês</h3>${pList(mVac.map(v=>pPerson(v.residentId, `${fmtShort(v.start)} a ${fmtShort(v.end)} · ${(()=>{ const n=Math.round((parseD(v.end)-parseD(v.start))/864e5)+1; return n===1?'1 dia':n+' dias'; })()}`, '<span class="pill p-vac">férias</span>')), 'Ninguém de férias neste mês.')}</div>
+  </section>`;
+
+  return `${wait}${hoje}${pendH}${semana}${mes}`;
+}
+Object.assign(actions, {
+  pweek(el){ const n=+el.dataset.n; S.pWeek = n ? addDays(S.pWeek, n) : today(); render(); },
+  pmonth(el){ S.pMonth=monthAdd(S.pMonth, +el.dataset.n); render(); },
+  pgo(el){ S.tab=el.dataset.tab2; if(el.dataset.to==='fora-da-area'||el.dataset.to==='trocas-coord') setMSec('registros'); render(); const id=el.dataset.to; setTimeout(()=>{ const t=document.getElementById(id); if(t) t.scrollIntoView({behavior:'smooth', block:'start'}); else window.scrollTo({top:0}); }, 60); },
+});
+
+// ---------- ajuste do pós-plantão de um plantão (exceção à regra) ----------
+// s.postOverride: 'AAAA-MM-DD' = pós-plantão neste dia; 'none' = sem pós-plantão; vazio = segue a regra.
+const isISO = v => /^\d{4}-\d{2}-\d{2}$/.test(v||'');
+function postDate(s){ if(s.postOverride==='none') return null; if(isISO(s.postOverride)) return s.postOverride; return rulePostDate(s); }
+const hasPostEdit = s => s.postOverride==='none' || isISO(s.postOverride);
+function posBtn(s){
+  const pd=postDate(s);
+  return `<button class="ghost" data-act="editpos" data-id="${esc(s.id)}" title="Editar o pós-plantão deste plantão">Pós: ${pd?fmtShort(pd):'nenhum'}${hasPostEdit(s)?' (ajustado)':''}</button>`;
+}
+// Na lista de pós-plantão do dia: quem cairia aqui pela regra mas foi ajustado.
+function posMovedAway(day){
+  if(!S.isCoord) return '';
+  const list=allShifts().filter(s=>hasPostEdit(s) && rulePostDate(s)===day && postDate(s)!==day);
+  if(!list.length) return '';
+  return `<section class="panel stack" id="pos-ajustados"><h3>Ajustados pela coordenação</h3><div class="muted" style="font-size:.84rem">Pela regra padrão estariam em pós-plantão neste dia.</div><div class="list">${list.map(s=>{ const pd=postDate(s);
+    return `<div class="li"><span class="l"><b>${esc(resName(s.residentId))}</b><span class="muted" style="font-size:.86rem">${esc(s.label||'Plantão')} de ${fmtShort(s.date)} · ${pd?`pós-plantão passou para ${fmtDay(pd)}`:'sem pós-plantão'}</span></span><button class="ghost" data-act="editpos" data-id="${esc(s.id)}">Editar</button></div>`; }).join('')}</div></section>`;
+}
+function openPosEdit(sid){
+  const s=allShifts().find(x=>x.id===sid); if(!s||!S.isCoord) return;
+  const rule=rulePostDate(s), cur=s.postOverride==='none'?'none':isISO(s.postOverride)?'date':'rule';
+  const dv=isISO(s.postOverride)?s.postOverride:(rule||addDays(s.date,1));
+  modal(`<div class="row between"><h2>Pós-plantão</h2><button class="ghost" data-act="close">Fechar</button></div>
+    <div><b>${esc(resName(s.residentId))}</b> <span class="yr">${esc(S.residents[s.residentId]?.year||'')}</span></div>
+    <div class="muted" style="font-size:.9rem">${esc(s.label||'Plantão')} · ${shiftLabel(s)}</div>
+    <div class="muted" style="font-size:.9rem">Pela regra padrão: <b style="color:var(--ink)">${rule?fmtDay(rule):'não gera pós-plantão'}</b></div>
+    <div class="list">
+      <label class="li" style="justify-content:flex-start;gap:10px;cursor:pointer;flex-wrap:nowrap"><input type="radio" name="posmode" value="rule" ${cur==='rule'?'checked':''}><span>Seguir a regra padrão</span></label>
+      <label class="li" style="justify-content:flex-start;gap:10px;cursor:pointer;flex-wrap:wrap"><input type="radio" name="posmode" value="date" ${cur==='date'?'checked':''}><span>Pós-plantão em outro dia</span><input type="date" id="posDate" min="${addDays(s.date,1)}" value="${esc(dv)}" style="margin-left:auto"></label>
+      <label class="li" style="justify-content:flex-start;gap:10px;cursor:pointer;flex-wrap:nowrap"><input type="radio" name="posmode" value="none" ${cur==='none'?'checked':''}><span>Sem pós-plantão neste plantão</span></label>
+    </div>
+    <div class="row"><button class="primary" data-act="saveposedit" data-id="${esc(s.id)}">Salvar</button></div>
+    <div class="muted" style="font-size:.82rem">Vale só para este plantão. As regras de pós-plantão continuam iguais para todos os outros. Se o residente tiver dia de estágio no novo dia do pós-plantão, o app retira esse dia; dias de estágio já retirados antes não voltam sozinhos.</div>`);
+}
+document.addEventListener('focusin', ev=>{ if(ev.target.id==='posDate'){ const r=document.querySelector('input[name="posmode"][value="date"]'); if(r) r.checked=true; } });
+Object.assign(actions, {
+  editpos(el){ openPosEdit(el.dataset.id); },
+  async saveposedit(el){
+    const s=allShifts().find(x=>x.id===el.dataset.id); if(!s) return;
+    const mode=document.querySelector('input[name="posmode"]:checked')?.value||'rule';
+    let val=null;
+    if(mode==='none') val='none';
+    if(mode==='date'){ val=document.getElementById('posDate')?.value||''; if(!isISO(val)){ toast('Escolha o dia do pós-plantão.'); return; } if(val<=s.date){ toast('O pós-plantão precisa ser depois do dia do plantão.'); return; } }
+    if(mode==='date' && val===rulePostDate(s)) val=null; // igual à regra: não precisa de exceção
+    const pd = val==='none' ? null : (val || rulePostDate(s));
+    const idx=checkIndex();
+    const onPd = pd ? allShifts().filter(x=>x.residentId===s.residentId && x.date===pd && x.id!==s.id) : [];
+    const stageOut = onPd.filter(x=>isStageEntry(x) && !idx[x.id]?.in);
+    if(onPd.some(x=>!stageOut.includes(x)) && !el_confirm('posedit'+s.id)){ toast(`${firstName(s.residentId)} já tem plantão em ${fmtShort(pd)}. Toque de novo em Salvar para confirmar.`); return; }
+    closeModal();
+    await guard(async()=>{ if(stageOut.length) await removeShifts(stageOut); await S.db.doc('schedule/'+s.month).update({shifts:{[s.id]:{postOverride:val}}}); },
+      (val==='none' ? 'Pós-plantão retirado deste plantão' : pd ? `Pós-plantão em ${fmtDay(pd)}` : 'Segue a regra padrão') + (stageOut.length?' · retirado do estágio nesse dia':''));
+  },
+});
+
+// ---------- Gerenciar organizado em seções ----------
+const MSECS=[['escala','Escala'],['pessoas','Pessoas'],['hospitais','Hospitais'],['regras','Regras'],['registros','Registros']];
+try{ S.mSec=localStorage.getItem('esc_msec')||'escala'; S.mAdd=localStorage.getItem('esc_madd')==='1'; }catch(e){ S.mSec='escala'; S.mAdd=false; }
+function setMSec(k){ S.mSec=k; try{ localStorage.setItem('esc_msec',k); }catch(e){} }
+
+// janelas (sheets) que se atualizam depois de salvar
+function openSheet(fn, arg){ const h=fn(arg); if(!h) return; modal(h); S.sheet={fn, arg}; }
+function refreshSheet(){ if(!S.sheet) return; const h=S.sheet.fn(S.sheet.arg); const box=document.querySelector('#modal .sheet'); if(!h||!box){ closeModal(); return; } box.innerHTML=h; }
+const sheetHead = t => `<div class="row between"><h2>${t}</h2><button class="ghost" data-act="close">Fechar</button></div>`;
+const yrOpts = (sel, all) => YEARS.map(y=>`<option ${y===sel?'selected':''}>${y}</option>`).join('') + (all?`<option value="" ${!sel?'selected':''}>Todos os anos</option>`:'');
+
+function viewGerenciar(){
+  if (!S.isCoord) return viewEscala();
+  const sec=MSECS.some(([k])=>k===S.mSec)?S.mSec:'escala';
+  const noMail=Object.keys(S.residents).filter(id=>!emailOf(id)).length;
+  const toReview=Object.values(S.marks).filter(m=>m.flag && !m.review).length;
+  const badge={pessoas:noMail, registros:toReview};
+  const nav=`<div class="seg mseg" role="group" aria-label="Seções do Gerenciar">${MSECS.map(([k,l])=>`<button data-act="msec" data-v="${k}" aria-pressed="${sec===k}">${l}${badge[k]?`<span class="mbadge">${badge[k]}</span>`:''}</button>`).join('')}</div>`;
+  const body={escala:mEscala, pessoas:mPessoas, hospitais:mHospitais, regras:mRegras, registros:mRegistros}[sec]();
+  return nav+body;
+}
+
+// ----- Escala -----
+function mEscala(){
+  const d=S.manageDate, idx=checkIndex(), all=allShifts();
+  const list=all.filter(s=>s.date===d);
+  const hList=Object.entries(S.hospitals).sort((a,b)=>a[1].name.localeCompare(b[1].name));
+  const selH=S.hospitals[S.form.hosp]?S.form.hosp:(hList[0]?.[0]||'');
+  const selSt=S.stages[S.form.stage]?.hospitalId===selH?S.form.stage:'';
+  const hOpts=hList.map(([id,h])=>`<option value="${id}" ${id===selH?'selected':''}>${esc(h.name)}</option>`).join('');
+  const posts=[...new Set(postOn(d, all).map(s=>s.residentId))];
+  const vacs=Object.values(S.vacations).filter(v=>v.start<=d && d<=v.end).map(v=>v.residentId);
+  const groups=hList.map(([hid,h])=>{
+    const hs=list.filter(s=>s.hospitalId===hid); if(!hs.length) return '';
+    const order=stagesOf(hid).map(([id])=>id);
+    hs.sort((a,b)=>{ const ka=S.stages[a.stageId]?order.indexOf(a.stageId):999, kb=S.stages[b.stageId]?order.indexOf(b.stageId):999; return ka-kb || a.start.localeCompare(b.start) || resName(a.residentId).localeCompare(resName(b.residentId),'pt-BR'); });
+    const rows=hs.map(s=>{ const pd=postDate(s);
+      const sub=[S.stages[s.stageId]?esc(S.stages[s.stageId].name):'', `<span class="time">${s.start}–${s.end}</span>`, pd?`pós ${fmtShort(pd)}${hasPostEdit(s)?' (ajustado)':''}`:(hasPostEdit(s)?'sem pós (ajustado)':''), idx[s.id]?.in?'com check-in':''].filter(Boolean).join(' · ');
+      return `<button class="li mrow" data-act="shiftsheet" data-id="${esc(s.id)}">${avatar(s.residentId)}<span class="l"><b>${esc(resName(s.residentId))} <span class="yr">${esc(S.residents[s.residentId]?.year||'')}</span></b><span class="muted" style="font-size:.85rem">${sub}</span></span><span class="chev" aria-hidden="true">›</span></button>`; }).join('');
+    return `<div class="mgrp"><h3 class="ygrp">${esc(h.short?h.short+' · ':'')}${esc(h.name)} <span class="muted">(${hs.length})</span></h3><div class="list">${rows}</div></div>`;
+  }).join('');
+  const pc=posConflicts();
+  const pcHtml = pc.length ? `<section class="banner" id="conflitos-pos" style="background:var(--post-soft)"><div><b>${pc.length} dia${pc.length===1?'':'s'} de estágio ca${pc.length===1?'i':'em'} em pós-plantão</b><div class="muted" style="font-size:.86rem">${pc.slice(0,6).map(s=>`${esc(resName(s.residentId))} em ${fmtShort(s.date)}`).join(' · ')}${pc.length>6?' …':''}</div></div><button class="primary" data-act="fixpos">Retirar do estágio nesses dias</button></section>` : '';
+  const info=[posts.length?`<span><span class="pill p-post">Pós-plantão</span> ${posts.map(r=>esc(resName(r))).join(', ')}</span>`:'', vacs.length?`<span><span class="pill p-vac">Férias</span> ${vacs.map(r=>esc(resName(r))).join(', ')}</span>`:''].filter(Boolean).join('');
+  const form = S.mAdd ? `<section class="panel stack" id="add-plantao"><div class="row between"><h3>Adicionar plantão em ${fmtDay(d)}</h3><button class="ghost" data-act="madd">Fechar</button></div>
+    <div class="form"><label class="f">Hospital<select id="sHosp">${hOpts}</select></label>
+      <label class="f">Estágio<select id="sStage">${stageOpts(selH,selSt)}</select></label>
+      <label class="f">Residente<select id="sRes">${resOptsFor(selSt,d)}</select></label>
+      <label class="f">Início<input type="time" id="sStart" value="07:00"></label>
+      <label class="f">Fim<input type="time" id="sEnd" value="19:00"></label>
+      <label class="f">Tipo<select id="sLabel"><option>Diurno 12h</option><option>Noturno 12h</option><option>Plantão 24h</option><option>Manhã 6h</option><option>Tarde 6h</option><option>Estágio</option></select></label>
+      <label class="f">Repetir até (opcional)<input type="date" id="sUntil" min="${d}" value="${esc(S.form.until&&S.form.until>d?S.form.until:'')}"></label></div>
+    <div id="sDaysWrap" class="stack" style="gap:6px" ${S.form.until&&S.form.until>d?'':'hidden'}><span class="f-lab">Dias da semana no período</span><div class="wdays" id="sDays">${[1,2,3,4,5,6,0].map(w=>`<label class="wd"><input type="checkbox" value="${w}" ${(S.form.days||[]).includes(w)?'checked':''}> ${WD[w]}</label>`).join('')}</div><span class="muted" style="font-size:.82rem">Cria um lançamento por dia marcado, de ${fmtShort(d)} até a data final. Dias de férias ou de pós-plantão do residente são pulados.</span></div>
+    <div><button class="primary" data-act="addshift">Adicionar</button></div></section>`
+    : `<button class="primary big" data-act="madd" style="width:100%">+ Adicionar plantão em ${fmtShort(d)}</button>`;
+  return `${pcHtml}<section class="panel stack" id="escala-dia"><div class="row between"><h2>Escala do dia</h2><div class="datebar"><button aria-label="Dia anterior" data-act="mday" data-n="-1">‹</button><input type="date" id="mDay" value="${d}" aria-label="Data"><button aria-label="Próximo dia" data-act="mday" data-n="1">›</button></div></div>
+    <div class="muted" style="font-size:.9rem"><b style="color:var(--ink)">${fmtDay(d)}</b> · ${list.length} ${list.length===1?'plantão':'plantões'}</div>
+    ${info?`<div class="minfo">${info}</div>`:''}
+    ${groups||'<div class="empty">Nenhum plantão neste dia.</div>'}
+    ${list.length?'<div class="muted" style="font-size:.8rem">Toque num plantão para mudar o pós-plantão ou remover.</div>':''}</section>
+  ${form}`;
+}
+function shiftSheet(id){
+  const s=allShifts().find(x=>x.id===id); if(!s) return '';
+  const c=checkIndex()[s.id], pd=postDate(s), rule=rulePostDate(s);
+  return `${sheetHead('Plantão')}
+    <div class="row" style="flex-wrap:nowrap;gap:12px">${avatar(s.residentId)}<div><b>${esc(resName(s.residentId))}</b> <span class="yr">${esc(S.residents[s.residentId]?.year||'')}</span><div class="muted" style="font-size:.9rem">${fmtDay(s.date)}</div></div></div>
+    <dl class="kv" style="margin:0">
+      <div><dt>Local</dt><dd>${esc(hospName(s.hospitalId))}${S.stages[s.stageId]?' · '+esc(S.stages[s.stageId].name):''}</dd></div>
+      <div><dt>Horário</dt><dd><span class="time">${s.start}–${s.end}</span> · ${esc(s.label||'')}</dd></div>
+      <div><dt>Pós-plantão</dt><dd>${pd?fmtDay(pd):'nenhum'}${hasPostEdit(s)?` <span class="pill p-wait">ajustado</span><div class="muted" style="font-size:.82rem">Pela regra: ${rule?fmtDay(rule):'não gera'}</div>`:''}</dd></div>
+      ${c?.in?`<div><dt>Registro</dt><dd><span class="time">${hm(new Date(c.in))}–${c.out?hm(new Date(c.out)):'…'}</span>${c.flag?' <span class="pill p-post">fora da área</span>':''}</dd></div>`:''}
+      ${s.batch&&s.until?`<div><dt>Período</dt><dd>lançado até ${fmtShort(s.until)}</dd></div>`:''}
+      ${s.swap?'<div><dt>Troca</dt><dd>veio de uma troca entre residentes</dd></div>':''}
+    </dl>
+    <div class="row"><button data-act="editpos" data-id="${esc(s.id)}">Alterar pós-plantão</button></div>
+    <hr class="sep">
+    <div class="row"><button class="bad" data-act="delshift" data-id="${esc(s.id)}" data-m="${esc(s.month)}">${s.batch?'Remover só este dia':'Remover plantão'}</button>${s.batch?`<button class="ghost" style="color:var(--bad)" data-act="delbatch" data-b="${esc(s.batch)}" data-from="${s.date}">Remover daqui até o fim do período</button>`:''}</div>`;
+}
+
+// ----- Pessoas -----
+function mPessoas(){
+  const rows=resByYear().map(([y,list])=>`<h3 class="ygrp">${esc(y)} · ${list.length} residente${list.length===1?'':'s'}</h3><div class="list">`+list.map(([id,r])=>{ const e=emailOf(id);
+    return `<button class="li mrow" data-act="ressheet" data-id="${esc(id)}">${avatar(id)}<span class="l"><b>${esc(r.name)}</b><span class="muted" style="font-size:.85rem">${e?esc(e):'<span style="color:var(--post);font-weight:600">sem e-mail de acesso</span>'}</span></span><span class="chev" aria-hidden="true">›</span></button>`; }).join('')+'</div>').join('');
+  return `<section class="panel stack" id="residentes"><div class="row between"><h2>Residentes</h2><button class="primary" data-act="newres">+ Residente</button></div>
+    ${rows||'<div class="empty">Nenhum residente cadastrado.</div>'}
+    <div class="muted" style="font-size:.8rem">Toque num nome para editar o nome, o ano ou o e-mail.</div></section>
+  ${accessPanel()}`;
+}
+function resSheet(id){
+  const r=S.residents[id]; if(!r) return '';
+  return `${sheetHead('Residente')}
+    <label class="f">Nome<input id="rn-${esc(id)}" type="text" value="${esc(r.name)}"></label>
+    <label class="f">Ano<select id="ry-${esc(id)}">${yrOpts(r.year)}</select></label>
+    <label class="f">E-mail de acesso<input id="rem-${esc(id)}" type="email" value="${esc(emailOf(id))}" placeholder="e-mail que o residente usa para entrar" autocapitalize="none"></label>
+    <div class="row"><button class="primary" data-act="saveres" data-id="${esc(id)}">Salvar</button></div>
+    <hr class="sep">
+    <div class="row"><button class="bad" data-act="delres" data-id="${esc(id)}">Remover residente</button></div>
+    <div class="muted" style="font-size:.8rem">Remover tira o acesso dele ao app. Os plantões já lançados continuam na escala.</div>`;
+}
+function newResSheet(){
+  return `${sheetHead('Novo residente')}
+    <label class="f">Nome<input id="rName" type="text"></label>
+    <label class="f">Ano<select id="rYear">${yrOpts('ME1')}</select></label>
+    <label class="f">E-mail de acesso<input id="rEmail" type="email" autocapitalize="none"></label>
+    <div class="row"><button class="primary" data-act="addres">Adicionar</button></div>
+    <details><summary class="sumx">Adicionar vários de uma vez</summary><div class="stack" style="margin-top:8px"><label class="f">Um por linha: Nome;Ano;e-mail<textarea id="rBulk" placeholder="Maria Souza;ME1;maria@gmail.com"></textarea></label><div><button data-act="bulkres">Adicionar lista</button></div></div></details>`;
+}
+
+// ----- Hospitais e estágios -----
+function mHospitais(){
+  const hs=Object.entries(S.hospitals).sort((a,b)=>a[1].name.localeCompare(b[1].name)), td=today();
+  const cards=hs.map(([hid,h])=>{
+    const sts=stagesOf(hid).map(([id,st])=>{ const n=Object.values(S.stageAssign).filter(a=>a.stageId===id && (!a.end||a.end>=td)).length;
+      return `<button class="li mrow" data-act="stagesheet" data-id="${esc(id)}"><span class="l"><b>${esc(st.name)} ${st.year?`<span class="yr">${esc(st.year)}</span>`:''}</b>${n?`<span class="muted" style="font-size:.84rem">${n} com período fixo</span>`:''}</span><span class="chev" aria-hidden="true">›</span></button>`; }).join('');
+    return `<section class="panel stack hcard"><div class="row between" style="flex-wrap:nowrap"><div style="min-width:0"><div class="eyebrow">${esc(h.short||'')}</div><h2 style="font-size:1.1rem">${esc(h.name)}</h2></div><button class="ghost" data-act="hospsheet" data-id="${esc(hid)}">Editar</button></div>
+      <div class="row between"><span class="muted" style="font-size:.88rem">${h.geo?`Check-in a até ${fmtDist(h.geo.radius)} do hospital`:'Check-in sem conferir a localização'}</span><button class="ghost" data-act="geo" data-id="${esc(hid)}">${h.geo?'Alterar local':'Definir local'}</button></div>
+      <div><h3 class="ygrp">Estágios</h3><div class="list">${sts||'<div class="empty">Nenhum estágio.</div>'}</div></div>
+      <div><button class="ghost" data-act="newstage" data-id="${esc(hid)}">+ Estágio</button></div></section>`;
+  }).join('');
+  return `<div class="row between"><h2>Hospitais e estágios</h2><button class="primary" data-act="newhosp">+ Hospital</button></div>
+    ${cards||'<div class="panel muted">Nenhum hospital cadastrado.</div>'}
+    <p class="note-ex" style="margin:0">Na hora de montar a escala, escolha o hospital, o estágio e o residente. “Período fixo” serve para quem fica num estágio sem plantão lançado.</p>`;
+}
+function hospSheet(hid){
+  const h=S.hospitals[hid]; if(!h) return '';
+  return `${sheetHead('Hospital')}
+    <label class="f">Nome<input id="hn-${esc(hid)}" type="text" value="${esc(h.name)}"></label>
+    <label class="f">Sigla<input id="hs-${esc(hid)}" type="text" value="${esc(h.short||'')}" maxlength="6"></label>
+    <div class="row"><button class="primary" data-act="savehosp" data-id="${esc(hid)}">Salvar</button><button data-act="geo" data-id="${esc(hid)}">${h.geo?'Local do check-in':'Definir local do check-in'}</button></div>
+    <hr class="sep">
+    <div class="row"><button class="bad" data-act="delhosp" data-id="${esc(hid)}">Remover hospital</button></div>`;
+}
+function newHospSheet(){
+  return `${sheetHead('Novo hospital')}
+    <label class="f">Nome<input id="hName" type="text"></label>
+    <label class="f">Sigla<input id="hShort" type="text" maxlength="6"></label>
+    <div class="row"><button class="primary" data-act="addhosp">Adicionar</button></div>`;
+}
+function newStageSheet(hid){
+  const h=S.hospitals[hid]; if(!h) return '';
+  return `${sheetHead('Novo estágio')}
+    <div class="muted">${esc(h.name)}</div>
+    <label class="f">Nome<input type="text" id="nsn-${esc(hid)}" placeholder="Ex.: Estágio A"></label>
+    <label class="f">Ano<select id="nsy-${esc(hid)}">${yrOpts('ME1', true)}</select></label>
+    <div class="row"><button class="primary" data-act="addstage" data-id="${esc(hid)}">Criar estágio</button></div>`;
+}
+function stageSheet(id){
+  const st=S.stages[id]; if(!st) return ''; const td=today();
+  const as=Object.entries(S.stageAssign).filter(([,a])=>a.stageId===id).sort((a,b)=>a[1].start.localeCompare(b[1].start));
+  const cur=as.filter(([,a])=>!a.end||a.end>=td), old=as.length-cur.length;
+  const arows=cur.map(([aid,a])=>`<div class="li"><span class="l"><b>${esc(resName(a.residentId))}</b><span class="muted" style="font-size:.85rem">${fmtShort(a.start)}${a.end?' a '+fmtShort(a.end):' em diante'}${a.start<=td?' · atual':''}</span></span><button class="ghost" style="color:var(--bad)" data-act="delassign" data-id="${esc(aid)}">Tirar</button></div>`).join('');
+  const opts=resByYear().filter(([y])=>!st.year||y===st.year).map(([y,list])=>`<optgroup label="${esc(y)}">${list.map(([rid,r])=>`<option value="${rid}">${esc(r.name)}</option>`).join('')}</optgroup>`).join('');
+  return `${sheetHead('Estágio')}
+    <div class="muted">${esc(hospName(st.hospitalId))}</div>
+    <div class="form"><label class="f">Nome<input id="stn-${esc(id)}" type="text" value="${esc(st.name)}"></label><label class="f">Ano<select id="sty-${esc(id)}">${yrOpts(st.year, true)}</select></label><button class="primary" data-act="savestage" data-id="${esc(id)}">Salvar</button></div>
+    <hr class="sep">
+    <h3>Período fixo (opcional)</h3>
+    <div class="list">${arows||'<div class="empty">Ninguém com período fixo.</div>'}</div>${old?`<div class="note-ex">${old} período${old===1?'':'s'} encerrado${old===1?'':'s'}.</div>`:''}
+    <div class="form"><label class="f">Residente<select id="sar-${esc(id)}">${opts||'<option value="">Nenhum residente deste ano</option>'}</select></label><label class="f">Início<input type="date" id="sas-${esc(id)}" value="${td}"></label><label class="f">Fim (opcional)<input type="date" id="sae-${esc(id)}"></label><button data-act="addassign" data-id="${esc(id)}">Colocar no estágio</button></div>
+    <hr class="sep">
+    <div class="row"><button class="bad" data-act="delstage" data-id="${esc(id)}">Remover estágio</button></div>`;
+}
+
+// ----- Regras -----
+const WDS=['domingo','segunda','terça','quarta','quinta','sexta','sábado'];
+const shortPost=(wd,o)=>WDS[(wd+o)%7]+(o===1?' (dia seguinte)':o>=7?' (uma semana depois)':wd+o>6?' (semana seguinte)':'');
+const RULE_ORDER=[['n',1],['n',2],['n',3],['n',4],['n',5],['d',6],['n',6],['d',0],['n',0]];
+function mRegras(){
+  if (S.rulesEdit) return `<div class="row"><button data-act="rulesedit">‹ Voltar sem editar</button></div>${rulesPanel()}`;
+  const sets=ruleSets().slice().sort((a,b)=>a.from.localeCompare(b.from)); const cur=ruleFor(today());
+  const tables=sets.map(x=>`<div class="rule"><div class="row between"><b>${x.from<='2000-01-01'?'Regra inicial':'A partir de '+fmtShort(x.from)+'/'+x.from.slice(0,4)}</b>${x.from===cur.from?'<span class="pill p-done">Em vigor hoje</span>':(x.from>today()?'<span class="pill p-wait">Futura</span>':'<span class="pill p-wait">Anterior</span>')}</div>
+    <div class="list">${RULE_ORDER.map(([k,wd])=>{ const o=Number((k==='d'?x.dayOffsets:x.offsets)?.[wd] ?? 0);
+      return `<div class="li rline"><span>${k==='d'?'Diurno':'Noturno'} de ${WDS[wd]}</span><b class="${o?'':'muted'}">${o?shortPost(wd,o):'sem pós-plantão'}</b></div>`; }).join('')}</div>${wsNames(x).length?`<div class="wsnote"><b>Sábado e domingo:</b> a regra vale só para ${wsNames(x).join(', ')}. Plantões de fim de semana em outros estágios não geram pós-plantão.</div>`:''}</div>`).join('');
+  const td=today();
+  const ex=allShifts().filter(s=>hasPostEdit(s) && s.date>=addDays(td,-7)).slice(0,40);
+  const exRows=ex.map(s=>{ const pd=postDate(s); return `<button class="li mrow" data-act="editpos" data-id="${esc(s.id)}"><span class="l"><b>${esc(resName(s.residentId))}</b><span class="muted" style="font-size:.85rem">${esc(s.label||'Plantão')} de ${fmtShort(s.date)} · ${pd?'pós em '+fmtShort(pd):'sem pós-plantão'}</span></span><span class="chev" aria-hidden="true">›</span></button>`; }).join('');
+  return `<section class="panel stack" id="regras-pos"><div class="row between"><h2>Pós-plantão</h2><button class="primary" data-act="rulesedit">Editar regras</button></div>
+      <div class="muted" style="font-size:.85rem">O pós-plantão aparece sozinho quando o residente é escalado. Noturno vale para os plantões que viram a noite; diurno, para os que terminam no mesmo dia.</div>
+      ${tables}</section>
+    <section class="panel stack" id="ajustes-pos"><h2>Ajustes por plantão</h2><div class="muted" style="font-size:.85rem">Plantões em que a coordenação mudou o pós-plantão só daquele caso. Para criar um ajuste, toque no plantão em Escala.</div><div class="list">${exRows||'<div class="empty">Nenhum ajuste.</div>'}</div></section>
+    ${importPanel()}`;
+}
+
+// ----- Registros -----
+function mRegistros(){
+  const f=flaggedPanel(), sw=coordSwapsPanel();
+  return `${f||'<section class="panel stack" id="fora-da-area"><h2>Registros fora da área</h2><div class="empty">Nenhum registro fora da área nos últimos dois meses.</div></section>'}
+    ${sw||'<section class="panel stack" id="trocas-coord"><h2>Trocas entre residentes</h2><div class="empty">Nenhuma troca ainda.</div></section>'}`;
+}
+
+Object.assign(actions, {
+  msec(el){ setMSec(el.dataset.v); S.rulesEdit=false; render(); window.scrollTo({top:0}); },
+  madd(){ S.mAdd=!S.mAdd; try{ localStorage.setItem('esc_madd', S.mAdd?'1':'0'); }catch(e){} render(); if(S.mAdd) setTimeout(()=>document.getElementById('add-plantao')?.scrollIntoView({behavior:'smooth', block:'start'}), 50); },
+  shiftsheet(el){ openSheet(shiftSheet, el.dataset.id); },
+  ressheet(el){ openSheet(resSheet, el.dataset.id); },
+  newres(){ openSheet(newResSheet); },
+  hospsheet(el){ openSheet(hospSheet, el.dataset.id); },
+  newhosp(){ openSheet(newHospSheet); },
+  stagesheet(el){ openSheet(stageSheet, el.dataset.id); },
+  newstage(el){ openSheet(newStageSheet, el.dataset.id); },
+  rulesedit(){ S.rulesEdit=!S.rulesEdit; render(); window.scrollTo({top:0}); },
+  goManage(){ S.manageDate=S.date; S.tab='gerenciar'; setMSec('escala'); S.mAdd=true; render(); window.scrollTo({top:0}); },
+});
+// depois de salvar uma regra, volta para a tabela
+{ const orig=actions.saverules; actions.saverules=async function(el){ const before=JSON.stringify(S.config.pos||null); await orig.call(this, el); if(JSON.stringify(S.config.pos||null)!==before){ S.rulesEdit=false; render(); } }; }
+// fecha a janela depois de salvar com sucesso
+for (const [k, ok] of [['saveres', id=>S.residents[id]?.name===(document.getElementById('rn-'+id)?.value||'').trim()], ['savehosp', id=>S.hospitals[id]?.name===(document.getElementById('hn-'+id)?.value||'').trim()]]){
+  const orig=actions[k]; actions[k]=async function(el){ const id=el.dataset.id; const inSheet=!!el.closest('.sheet'); await orig.call(this, el); if(inSheet && ok(id) && S.sheet) closeModal(); };
+}
+
+// ---------- regra do fim de semana limitada a alguns estágios ----------
+// rule.weekendStages: lista de estágios; vazia ou ausente = vale para todos os plantões de sábado e domingo.
+const isWeekendDay = d => { const wd=parseD(d).getDay(); return wd===0||wd===6; };
+function weekendBlocked(s){ const r=ruleFor(s.date); const ws=(r.weekendStages||[]).filter(id=>S.stages[id]); return ws.length>0 && isWeekendDay(s.date) && !ws.includes(s.stageId); }
+const wsNames = r => (r.weekendStages||[]).filter(id=>S.stages[id]).map(id=>{ const st=S.stages[id]; return esc(st.name)+(S.hospitals[st.hospitalId]?.short?' ('+esc(S.hospitals[st.hospitalId].short)+')':''); });
+function wsPicker(x){
+  const sel=new Set(x.weekendStages||[]);
+  const groups=Object.entries(S.hospitals).sort((a,b)=>a[1].name.localeCompare(b[1].name)).map(([hid,h])=>{ const sts=stagesOf(hid); if(!sts.length) return '';
+    return `<div class="stack" style="gap:6px"><span class="f-lab">${esc(h.short?h.short+' · ':'')}${esc(h.name)}</span><div class="wdays">${sts.map(([id,st])=>`<label class="wd"><input type="checkbox" id="pws-${x.i}-${esc(id)}" data-ws="${x.i}" value="${esc(id)}" ${sel.has(id)?'checked':''}> ${esc(st.name)}${st.year?' · '+esc(st.year):''}</label>`).join('')}</div></div>`; }).join('');
+  return `<details class="wsbox" ${sel.size?'open':''}><summary class="sumx"><b>Sábado e domingo:</b> ${(()=>{ const n=[...sel].filter(id=>S.stages[id]).length; return n?`vale só para ${n} ${n===1?'estágio':'estágios'}`:'vale para todos os plantões'; })()}</summary>
+    <div class="stack" style="margin-top:8px;gap:10px"><div class="muted" style="font-size:.84rem">Marque os estágios em que a regra de sábado e domingo vale. Plantões de fim de semana nos outros estágios (como reposição) não geram pós-plantão. Deixe tudo desmarcado para valer em todos.</div>${groups||'<div class="empty">Nenhum estágio cadastrado.</div>'}</div></details>`;
+}
+const readWS = (i, x) => { const boxes=[...document.querySelectorAll(`input[data-ws="${i}"]`)]; return boxes.length ? boxes.filter(b=>b.checked).map(b=>b.value) : (x.weekendStages||[]); };
 
 // ---------- boot (Firebase) ----------
 const unsubs=[];
