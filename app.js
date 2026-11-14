@@ -1,4 +1,4 @@
-const APP_VERSION='20261111-1849';
+const APP_VERSION='20261113-1153';
 
 (() => {
 const S = {
@@ -70,10 +70,6 @@ async function writeMark(kind, s, extra){
     else await ref.update({outAt:ST, ...extra});
     ok=true;
   }, kind==='in'?'Check-in registrado':'Checkout registrado');
-  if(ok && kind==='out'){
-    const c=S.marks[s.id]; const ex=extraMins(s,{in:c?.in, out:new Date().toISOString()});
-    if(ex>=10){ S.tab='escala'; S.seg='meus'; render(); openAsk(s.id); }
-  }
 }
 
 // ---------- check-in records (one document per shift) ----------
@@ -500,7 +496,7 @@ function viewMeus(){
   const up=upcoming.map(s=>{const st=status(s,idx[s.id]); return `<div class="li"><span class="l"><b>${fmtDay(s.date)}</b><span class="muted" style="font-size:.88rem">${esc(hospName(s.hospitalId))}${S.stages[s.stageId]?' · '+esc(S.stages[s.stageId].name):''} · <span class="time">${s.start}–${s.end}</span></span></span><span class="row" style="gap:6px"><span class="pill ${st.cls}">${esc(st.label)}</span>${s.date>=today()&&!idx[s.id]?.in&&!busySwapIds().has(s.id)&&canSwapShift(s)?`<button class="ghost" data-act="swap" data-id="${esc(s.id)}">Trocar</button>`:''}</span></div>`}).join('');
   const hist=past.map(s=>{ const c=idx[s.id]; const ex=extraMins(s,c); const q=reqByShift[s.id];
     const real = c?.in ? `<span class="time">${hm(new Date(c.in))}–${c.out?hm(new Date(c.out)):'…'}</span>` : '<span class="pill p-miss">Sem registro</span>';
-    const act = q ? pillFor(q) : (ex>=10 ? `<button class="primary" data-act="ask" data-id="${s.id}">Justificar ${fmtDur(ex)}</button>` : '');
+    const act = q ? pillFor(q) : '';
     return `<div class="li"><span class="l"><b>${fmtShort(s.date)} · ${esc(S.hospitals[s.hospitalId]?.short||'')}</b><span class="muted" style="font-size:.88rem">Escala <span class="time">${s.start}–${s.end}</span> · Real ${real}${ex>0?` · <b style="color:var(--bad)">+${fmtDur(ex)}</b>`:''}</span></span>${act}</div>`; }).join('');
   return `${meCard()}${myStageCard()}
   <section class="panel stack" id="semana"><div class="sec-title"><h2>Carga da semana</h2><span class="muted time">${fmtShort(wa)} a ${fmtShort(wb)}</span></div>
@@ -509,7 +505,7 @@ function viewMeus(){
     <div class="muted" style="font-size:.82rem">Conta as horas reais dos plantões com checkout e as horas da escala dos demais. Limite da Lei 6.932/81.</div></section>
   <section class="two">
     <div class="panel" id="proximos"><h2 style="margin-bottom:6px">Próximos plantões</h2><div class="list">${up||'<div class="empty">Nenhum plantão futuro na escala.</div>'}</div>${upAll.length>10?`<button class="ghost" data-act="toggleup">${S.showAllUp?'Mostrar só os próximos':`Ver todos os ${upAll.length} plantões futuros`}</button>`:''}</div>
-    <div class="panel" id="historico"><div class="sec-title"><h2>Últimos 30 dias</h2><button class="ghost" data-act="ask" data-id="">Nova solicitação</button></div><div class="list">${hist||'<div class="empty">Sem plantões recentes.</div>'}</div></div>
+    <div class="panel" id="historico"><div class="sec-title"><h2>Últimos 30 dias</h2></div><button class="primary" data-act="ask" data-id="" style="width:100%">Solicitar compensação de horas</button><div class="list">${hist||'<div class="empty">Sem plantões recentes.</div>'}</div></div>
   </section>
   ${mySwapsPanel()}
   <section class="stack" id="minhas"><h2>Minhas solicitações</h2>${reqs.length?reqs.map(reqCard).join(''):'<div class="panel muted">Você ainda não pediu compensação de horas.</div>'}</section>
@@ -527,11 +523,11 @@ function reqCard(q){
   return `<article class="req ${q.status==='pendente'?'pend':''}">
     <div class="row between"><div><b>${esc(resName(q.residentId))}</b> <span class="yr">${esc(S.residents[q.residentId]?.year||'')}</span>${q.example?' <span class="note-ex">exemplo</span>':''}</div><div class="row">${pill}${undo}</div></div>
     <dl class="kv" style="margin:0">
-      <div><dt>Plantão</dt><dd>${s?`${fmtShort(s.date)} · ${esc(S.hospitals[s.hospitalId]?.short||'')} <span class="time">${s.start}–${s.end}</span>`:esc(q.shiftDate?fmtShort(q.shiftDate):'—')}</dd></div>
-      <div><dt>Registro real</dt><dd>${c?.in?`<span class="time">${hm(new Date(c.in))}–${c.out?hm(new Date(c.out)):'…'}</span>`:'Sem check-in'}</dd></div>
-      <div><dt>Horas adicionais</dt><dd><b>${fmtDur(q.minutes)}</b></dd></div>
+      <div><dt>Plantão</dt><dd>${s?`${fmtDay(s.date)} · ${esc(S.hospitals[s.hospitalId]?.short||'')}${S.stages[s.stageId]?' · '+esc(S.stages[s.stageId].name):''}`:esc(q.shiftDate?fmtShort(q.shiftDate):'—')}</dd></div>
+      <div><dt>Horas pedidas</dt><dd><b>${fmtDur(q.minutes)}</b></dd></div>
       <div><dt>Compensar em</dt><dd>${q.compDate?fmtDay(q.compDate):'—'}${q.compPeriod?` · ${esc(q.compPeriod)}`:''}${conflict&&S.isCoord?`<div class="warnline">Tem plantão neste dia (${esc(S.hospitals[conflict.hospitalId]?.short||'')} ${conflict.start}–${conflict.end})</div>`:''}</dd></div>
     </dl>
+    ${regBlock(q, s, c)}
     <div class="quote">${esc(q.reason)}</div>${dec}${decide}</article>`;
 }
 
@@ -540,7 +536,7 @@ function viewComp(){
   if (!S.isCoord){
     const r=myRes();
     const mine=all.filter(q=>q.residentId===r);
-    return `<section class="stack"><h2>Minhas compensações</h2>${r?(mine.length?mine.map(reqCard).join(''):'<div class="panel muted">Nenhuma solicitação. Em “Meus plantões”, use “Justificar” num plantão com horas além da jornada.</div>'):linkBanner()}</section>`;
+    return `<section class="stack"><h2>Minhas compensações</h2>${r?(mine.length?mine.map(reqCard).join(''):'<div class="panel muted">Nenhuma solicitação. Em “Meus plantões”, use o botão “Solicitar compensação de horas”.</div>'):linkBanner()}</section>`;
   }
   fetchMarks(all);
   const pend=all.filter(q=>q.status==='pendente');
@@ -645,8 +641,8 @@ function openAsk(shiftId){
   const sel = shiftId && opts.some(s=>s.id===shiftId) ? shiftId : opts[0].id;
   const m=document.getElementById('modal');
   m.innerHTML=`<div class="overlay" data-act="close"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="askT">
-    <div class="row between"><h2 id="askT">Justificar horas adicionais</h2><button class="ghost" data-act="close" aria-label="Fechar">Fechar</button></div>
-    <label class="f">Plantão<select id="qShift">${opts.map(s=>{const ex=extraMins(s,idx[s.id]); return `<option value="${s.id}" ${s.id===sel?'selected':''}>${fmtShort(s.date)} · ${esc(S.hospitals[s.hospitalId]?.short||'')} ${s.start}–${s.end}${ex?` · +${fmtDur(ex)}`:''}</option>`}).join('')}</select></label>
+    <div class="row between"><h2 id="askT">Solicitar compensação de horas</h2><button class="ghost" data-act="close" aria-label="Fechar">Fechar</button></div>
+    <label class="f">Plantão<select id="qShift">${opts.map(s=>{const ex=extraMins(s,idx[s.id]); return `<option value="${s.id}" ${s.id===sel?'selected':''}>${fmtShort(s.date)} · ${esc(S.hospitals[s.hospitalId]?.short||'')} ${s.start}–${s.end}</option>`}).join('')}</select></label>
     <div id="qInfo" class="muted" style="font-size:.88rem"></div>
     <div class="form"><label class="f">Horas<input type="number" id="qH" min="0" max="24" value="0"></label><label class="f">Minutos<input type="number" id="qM" min="0" max="59" step="5" value="0"></label></div>
     <label class="f">Justificativa<textarea id="qReason" placeholder="O que aconteceu e por que foi preciso ficar além da jornada"></textarea></label>
@@ -655,8 +651,8 @@ function openAsk(shiftId){
     <div id="qWarn" class="warnline"></div>
     <div class="row"><button class="primary big" data-act="sendask">Enviar para a coordenação</button></div></div></div>`;
   const fill=()=>{ const s=opts.find(x=>x.id===document.getElementById('qShift').value); const c=idx[s.id]; const ex=extraMins(s,c);
-    document.getElementById('qH').value=Math.floor(ex/60); document.getElementById('qM').value=ex%60;
-    document.getElementById('qInfo').textContent = c?.in ? `Escala ${s.start}–${s.end} (${fmtDur(times(s).mins)}). Registro real ${hm(new Date(c.in))}–${c.out?hm(new Date(c.out)):'sem checkout'}.` : 'Este plantão não tem check-in registrado. Informe as horas manualmente.'; checkDate(); };
+    document.getElementById('qH').value=0; document.getElementById('qM').value=0;
+    document.getElementById('qInfo').textContent = c?.in ? `Escala ${s.start}–${s.end} (${fmtDur(times(s).mins)}). Registro real ${hm(new Date(c.in))}–${c.out?hm(new Date(c.out)):'sem checkout'}.` : 'Este plantão não tem check-in registrado.'; checkDate(); };
   const checkDate=()=>{ const d=document.getElementById('qDate').value; const c=allShifts().find(x=>x.residentId===r&&x.date===d); document.getElementById('qWarn').textContent = c?`Você tem plantão nesse dia (${S.hospitals[c.hospitalId]?.short||''} ${c.start}–${c.end}).`:''; };
   document.getElementById('qShift').addEventListener('change',fill);
   document.getElementById('qDate').addEventListener('change',checkDate);
@@ -1323,6 +1319,33 @@ function wsPicker(x){
     <div class="stack" style="margin-top:8px;gap:10px"><div class="muted" style="font-size:.84rem">Marque os estágios em que a regra de sábado e domingo vale. Plantões de fim de semana nos outros estágios (como reposição) não geram pós-plantão. Deixe tudo desmarcado para valer em todos.</div>${groups||'<div class="empty">Nenhum estágio cadastrado.</div>'}</div></details>`;
 }
 const readWS = (i, x) => { const boxes=[...document.querySelectorAll(`input[data-ws="${i}"]`)]; return boxes.length ? boxes.filter(b=>b.checked).map(b=>b.value) : (x.weekendStages||[]); };
+
+// ---------- conferência do pedido de compensação: escala x registro real ----------
+function regBlock(q, s, c){
+  if(!s) return `<div class="regbox"><div class="regrow"><span>Plantão</span><b>${esc(q.shiftDate?fmtShort(q.shiftDate):'—')}</b></div><div class="muted" style="font-size:.84rem">Este plantão não está mais na escala.</div></div>`;
+  const t=times(s), ago=(a,b)=>Math.round((a-b)/60000);
+  const dayTag = d => isoDate(d)!==s.date ? ` <span class="muted">(${fmtShort(isoDate(d))})</span>` : '';
+  const rows=[`<div class="regrow"><span>Escala</span><b><span class="time">${s.start}–${s.end}</span> <span class="muted" style="font-weight:500">${fmtDur(t.mins)}</span></b></div>`];
+  let before=0, after=0;
+  if(!c?.in){
+    rows.push(`<div class="regrow"><span>Check-in</span><b style="color:var(--bad)">sem registro</b></div>`);
+  } else {
+    const ci=new Date(c.in), d1=ago(t.a, ci); before=Math.max(0,d1);
+    rows.push(`<div class="regrow"><span>Check-in</span><b><span class="time">${hm(ci)}</span>${dayTag(ci)} <span class="dlt ${d1>0?'':'late'}">${d1>0?fmtDur(d1)+' antes do início':d1<0?fmtDur(-d1)+' depois do início':'no horário'}</span></b></div>`);
+    if(c.out){
+      const co=new Date(c.out), d2=ago(co, t.b); after=Math.max(0,d2);
+      rows.push(`<div class="regrow"><span>Checkout</span><b><span class="time">${hm(co)}</span>${dayTag(co)} <span class="dlt ${d2>0?'xt':''}">${d2>0?fmtDur(d2)+' depois do fim':d2<0?fmtDur(-d2)+' antes do fim':'no horário'}</span></b></div>`);
+    } else rows.push(`<div class="regrow"><span>Checkout</span><b style="color:var(--bad)">sem registro</b></div>`);
+    if(c.flag) rows.push(`<div class="regrow"><span></span><span class="pill p-post">registro fora da área</span></div>`);
+  }
+  let sum='';
+  if(c?.in && c?.out){
+    const tot=before+after;
+    sum=`<div class="regsum">Além da escala: <b>${tot?fmtDur(tot):'nada'}</b>${tot?` <span class="muted">(${[after?fmtDur(after)+' depois do fim':'', before?fmtDur(before)+' antes do início':''].filter(Boolean).join(' + ')})</span>`:''}</div>`;
+    if(q.minutes>tot) sum+=`<div class="warnline">O pedido (${fmtDur(q.minutes)}) é maior que o tempo registrado além da escala.</div>`;
+  } else sum=`<div class="warnline">Sem ${c?.in?'checkout':'check-in'} registrado: não dá para conferir as horas pelo app.</div>`;
+  return `<div class="regbox">${rows.join('')}${sum}</div>`;
+}
 
 // ---------- boot (Firebase) ----------
 const unsubs=[];
