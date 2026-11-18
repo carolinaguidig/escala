@@ -1,4 +1,4 @@
-const APP_VERSION='20261113-1153';
+const APP_VERSION='20261116-0706';
 
 (() => {
 const S = {
@@ -98,10 +98,12 @@ function ensureMarks(){
 }
 function fetchMarks(reqs){
   for (const q of reqs){
-    const sid=q.shiftId, m=(q.shiftDate||'').slice(0,7);
-    if(!sid||!m||S.marks[sid]||fetchedMarks.has(sid)) continue;
-    fetchedMarks.add(sid);
-    S.fs.doc(`checkins/${m}/marks/${sid}`).get().then(d=>{ if(d.exists){ S.marks[d.id]=normMark(d); render(); } }).catch(()=>{});
+    const m=(q.shiftDate||'').slice(0,7); const head=chains()[q.shiftId]?.head;
+    for (const sid of [q.shiftId, head]){
+      if(!sid||!m||S.marks[sid]||fetchedMarks.has(sid)) continue;
+      fetchedMarks.add(sid);
+      S.fs.doc(`checkins/${m}/marks/${sid}`).get().then(d=>{ if(d.exists){ S.marks[d.id]=normMark(d); render(); } }).catch(()=>{});
+    }
   }
 }
 
@@ -317,10 +319,10 @@ function postOn(day, shifts){ return shifts.filter(s=>postDate(s)===day); }
 function postLabel(wd,o){ if(!o) return 'não gera'; return WDL[(wd+o)%7] + (o===1?' (dia seguinte)':o>=7?' (uma semana depois)':wd+o>6?' da semana seguinte':''); }
 function compOn(day){ return allRequests().filter(r=>r.status==='aprovado' && r.compDate===day); }
 function weekRange(day){ const d=parseD(day); const wd=(d.getDay()+6)%7; const a=addDays(day,-wd); return [a, addDays(a,6)]; }
-function workedMins(s, c){ if(c?.in && c?.out) return (new Date(c.out)-new Date(c.in))/60000; return null; }
-function extraMins(s,c){ const w=workedMins(s,c); if(w==null) return 0; return Math.max(0, Math.round(w - times(s).mins)); }
+function workedMins0(s, c){ if(c?.in && c?.out) return (new Date(c.out)-new Date(c.in))/60000; return null; }
+function extraMins0(s,c){ const w=workedMins0(s,c); if(w==null) return 0; return Math.max(0, Math.round(w - times(s).mins)); }
 
-function status(s, c){
+function status0(s, c){
   const t=times(s), now=new Date();
   if (c?.in && c?.out) return {k:'done', label:`Concluído ${hm(new Date(c.in))}–${hm(new Date(c.out))}`, cls:'p-done'};
   if (c?.in) return {k:'on', label:`Em plantão desde ${hm(new Date(c.in))}`, cls:'p-on'};
@@ -396,22 +398,12 @@ function meCard(){
   const r=myRes(); if(!r) return '';
   const s=myCurrentShift(); const idx=checkIndex();
   if (!s) return `<section class="me-card"><div class="eyebrow">Meu plantão</div><div class="where">Nenhum plantão na escala</div><div class="muted">Fale com a coordenação se isso estiver errado.</div></section>`;
-  const t=times(s), c=idx[s.id], now=new Date();
+  const t=spanTimes(s), c=idx[s.id], now=new Date();
   const canIn = now>=new Date(t.a.getTime()-60*60000) && now<=t.b;
-  let action='', extra='';
-  if (c?.in && !c?.out){
-    const worked=(now-new Date(c.in))/60000, over=Math.round(worked - t.mins);
-    action=`<button class="primary big" data-act="checkout" data-id="${s.id}">Fazer checkout · ${hm(now)}</button>`;
-    extra = over>0 ? `<div class="warnline">Você já passou ${fmtDur(over)} da jornada deste plantão. Ao sair, justifique as horas para pedir compensação.</div>` : `<div class="muted">Check-in às ${hm(new Date(c.in))} · faltam ${fmtDur((t.b-now)/60000)} para o fim da jornada</div>`;
-  } else if (canIn){
-    action=`<button class="primary big" data-act="checkin" data-id="${s.id}">Fazer check-in · ${hm(now)}</button>`;
-  } else {
-    action=`<button class="big" disabled>Check-in abre às ${hm(new Date(t.a.getTime()-60*60000))} de ${fmtShort(s.date)}</button>`;
-  }
   const label = c?.in&&!c?.out ? 'Em plantão agora' : (canIn?'Plantão de agora':'Próximo plantão');
   return `<section class="me-card" id="me-card"><div class="row between"><div class="eyebrow">${label}</div><span class="clock">${fmtDay(s.date)}</span></div>
-    <div><div class="where">${esc(hospName(s.hospitalId))}</div>${S.stages[s.stageId]?`<div class="muted" style="font-weight:600">${esc(S.stages[s.stageId].name)}</div>`:''}<div class="muted"><span class="time">${s.start}–${s.end}</span> · ${esc(s.label||'')}</div></div>
-    <div class="row">${action}</div>${extra}${S.hospitals[s.hospitalId]?.geo&&!c?.out?`<div class="muted" style="font-size:.84rem">O app confere se você está a até ${fmtDist(S.hospitals[s.hospitalId].geo.radius)} do hospital.</div>`:''}</section>`;
+    <div><div class="where">${esc(hospName(s.hospitalId))}</div>${S.stages[s.stageId]?`<div class="muted" style="font-weight:600">${esc(S.stages[s.stageId].name)}</div>`:''}<div class="muted">${chainOf(s)&&chainOf(s).head===s.id?`<span class="time">${chainOf(s).start}–${chainOf(s).end}</span> · ${fmtDur(chainOf(s).mins)} seguidas (${chainOf(s).ids.length} plantões, um check-in e um checkout)`:`<span class="time">${s.start}–${s.end}</span> · ${esc(s.label||'')}`}</div></div>
+    ${meActions(s, c, t, now)}${S.hospitals[s.hospitalId]?.geo&&!c?.out?`<div class="muted" style="font-size:.84rem">O app confere se você está a até ${fmtDist(S.hospitals[s.hospitalId].geo.radius)} do hospital.</div>`:''}</section>`;
 }
 
 const AVC=['#2F6F73','#6B4FA0','#8A5A2B','#2E5E8C','#7A3E5C','#3F6E3A','#8C4A3A','#555B66'];
@@ -466,7 +458,7 @@ function segTodos(shifts){
     return `<section id="h-${esc(hid)}"><h2 class="ghead">${esc(h.short?h.short+' - ':'')}${esc(h.name)}</h2>${st}${list.length?cardsByStage(list,idx,mine):''}</section>`;
   }).join('');
   const posts=postOn(day,shifts).length, comps=compOn(day);
-  return `${swapBanner()}${day===today()&&mine?meCard():''}${dayHeader(day, `${dayShifts.length} plantões · ${posts} em pós-plantão`)}${comps.length?`<div class="banner" style="background:var(--panel)"><span><b>Folga compensatória:</b> ${comps.map(r=>esc(resName(r.residentId))+' ('+esc(r.compPeriod||'')+')').join(', ')}</span></div>`:''}
+  return `${swapBanner()}${day===today()&&mine?meCard():''}${dayHeader(day, `${dayShifts.length} ${dayShifts.length===1?'plantão':'plantões'} · ${posts} em pós-plantão`)}${comps.length?`<div class="banner" style="background:var(--panel)"><span><b>Folga compensatória:</b> ${comps.map(r=>esc(resName(r.residentId))+' ('+esc(r.compPeriod||'')+')').join(', ')}</span></div>`:''}
   ${hospChips()}<div class="hgrid" id="hospitais">${groups||`<div class="panel stack"><span class="muted">Nenhum plantão escalado neste dia.</span>${S.isCoord?'<div><button class="primary" data-act="goManage">Montar a escala deste dia</button></div>':''}</div>`}</div>${exampleNote()}`;
 }
 function segMeus(){
@@ -494,7 +486,7 @@ function viewMeus(){
   const reqByShift={}; reqs.forEach(q=>reqByShift[q.shiftId]=q);
   const pillFor = q => q.status==='aprovado'?'<span class="pill p-yes">Compensação autorizada</span>':q.status==='negado'?'<span class="pill p-no">Compensação negada</span>':'<span class="pill p-pend">Aguardando coordenação</span>';
   const up=upcoming.map(s=>{const st=status(s,idx[s.id]); return `<div class="li"><span class="l"><b>${fmtDay(s.date)}</b><span class="muted" style="font-size:.88rem">${esc(hospName(s.hospitalId))}${S.stages[s.stageId]?' · '+esc(S.stages[s.stageId].name):''} · <span class="time">${s.start}–${s.end}</span></span></span><span class="row" style="gap:6px"><span class="pill ${st.cls}">${esc(st.label)}</span>${s.date>=today()&&!idx[s.id]?.in&&!busySwapIds().has(s.id)&&canSwapShift(s)?`<button class="ghost" data-act="swap" data-id="${esc(s.id)}">Trocar</button>`:''}</span></div>`}).join('');
-  const hist=past.map(s=>{ const c=idx[s.id]; const ex=extraMins(s,c); const q=reqByShift[s.id];
+  const hist=past.map(s=>{ const c=effMark(s); const ex=extraMins(s,c); const q=reqByShift[s.id];
     const real = c?.in ? `<span class="time">${hm(new Date(c.in))}–${c.out?hm(new Date(c.out)):'…'}</span>` : '<span class="pill p-miss">Sem registro</span>';
     const act = q ? pillFor(q) : '';
     return `<div class="li"><span class="l"><b>${fmtShort(s.date)} · ${esc(S.hospitals[s.hospitalId]?.short||'')}</b><span class="muted" style="font-size:.88rem">Escala <span class="time">${s.start}–${s.end}</span> · Real ${real}${ex>0?` · <b style="color:var(--bad)">+${fmtDur(ex)}</b>`:''}</span></span>${act}</div>`; }).join('');
@@ -650,9 +642,9 @@ function openAsk(shiftId){
       <label class="f">Período<select id="qPer"><option>Manhã</option><option>Tarde</option><option>Dia inteiro</option></select></label></div>
     <div id="qWarn" class="warnline"></div>
     <div class="row"><button class="primary big" data-act="sendask">Enviar para a coordenação</button></div></div></div>`;
-  const fill=()=>{ const s=opts.find(x=>x.id===document.getElementById('qShift').value); const c=idx[s.id]; const ex=extraMins(s,c);
+  const fill=()=>{ const s=opts.find(x=>x.id===document.getElementById('qShift').value); const c=effMark(s); const ex=extraMins(s,c);
     document.getElementById('qH').value=0; document.getElementById('qM').value=0;
-    document.getElementById('qInfo').textContent = c?.in ? `Escala ${s.start}–${s.end} (${fmtDur(times(s).mins)}). Registro real ${hm(new Date(c.in))}–${c.out?hm(new Date(c.out)):'sem checkout'}.` : 'Este plantão não tem check-in registrado.'; checkDate(); };
+    document.getElementById('qInfo').textContent = c?.in ? `Escala ${spanText(s)}. Registro real ${hm(new Date(c.in))}–${c.out?hm(new Date(c.out)):'sem checkout'}.` : 'Este plantão não tem check-in registrado.'; checkDate(); };
   const checkDate=()=>{ const d=document.getElementById('qDate').value; const c=allShifts().find(x=>x.residentId===r&&x.date===d); document.getElementById('qWarn').textContent = c?`Você tem plantão nesse dia (${S.hospitals[c.hospitalId]?.short||''} ${c.start}–${c.end}).`:''; };
   document.getElementById('qShift').addEventListener('change',fill);
   document.getElementById('qDate').addEventListener('change',checkDate);
@@ -968,7 +960,7 @@ function viewPainel(){
   // ----- hoje -----
   const recent=shifts.filter(s=>s.date>=addDays(td,-1) && s.date<=td);
   const onNow=recent.filter(s=>idx[s.id]?.in && !idx[s.id]?.out).sort((a,b)=>hospName(a.hospitalId).localeCompare(hospName(b.hospitalId)));
-  const noIn=recent.filter(s=>{ const t=times(s); return !idx[s.id]?.in && now>new Date(t.a.getTime()+30*60000) && now<=t.b; });
+  const noIn=recent.filter(s=>{ const t=times(s); return !effMark(s)?.in && now>new Date(t.a.getTime()+30*60000) && now<=t.b; });
   const posts=postOn(td,shifts);
   const vacs=Object.values(S.vacations).filter(v=>v.start<=td && td<=v.end).sort((a,b)=>resName(a.residentId).localeCompare(resName(b.residentId),'pt-BR'));
   const comps=compOn(td);
@@ -987,7 +979,7 @@ function viewPainel(){
   const pendSw=swapsList().filter(x=>x.status==='pendente');
   const flagged=Object.values(S.marks).filter(m=>m.flag && !m.review);
   const shById={}; shifts.forEach(s=>shById[s.id]=s);
-  const noOut=Object.entries(S.marks).filter(([sid,m])=>{ const s=shById[sid]; return s && m.in && !m.out && now>new Date(times(s).b.getTime()+2*3600e3); }).map(([sid])=>shById[sid]).sort((a,b)=>b.date.localeCompare(a.date));
+  const noOut=Object.entries(S.marks).filter(([sid,m])=>{ const s=shById[sid]; return s && m.in && !m.out && now>new Date(spanEnd(s).getTime()+2*3600e3); }).map(([sid])=>shById[sid]).sort((a,b)=>b.date.localeCompare(a.date));
   const pend=[];
   if(pendReq.length) pend.push(`<div class="li"><span class="l"><b>${pendReq.length} pedido${pendReq.length===1?'':'s'} de compensação</b><span class="muted" style="font-size:.85rem">aguardando sua decisão · ${pH(pendReq.reduce((t,q)=>t+(q.minutes||0),0))} no total</span></span><button class="primary" data-tab="comp">Decidir</button></div>`);
   if(flagged.length) pend.push(`<div class="li"><span class="l"><b>${flagged.length} registro${flagged.length===1?'':'s'} fora da área</b><span class="muted" style="font-size:.85rem">check-in ou checkout longe do hospital, para aceitar ou recusar</span></span><button data-act="pgo" data-tab2="gerenciar" data-to="fora-da-area">Revisar</button></div>`);
@@ -1015,7 +1007,7 @@ function viewPainel(){
   const reqs=allRequests();
   const apprBy={}; reqs.filter(q=>q.status==='aprovado' && ((q.shiftDate||shById[q.shiftId]?.date||'').slice(0,7)===pm)).forEach(q=>apprBy[q.residentId]=(apprBy[q.residentId]||0)+(q.minutes||0));
   const agg=key=>{ const o={}; for (const s of ms){ const k=s[key]; const a=o[k]=o[k]||{n:0,night:0,mins:0,extra:0,miss:0,flag:0}; const c=idx[s.id];
-    a.n++; if(night(s)) a.night++; a.mins+=workedMins(s,c) ?? times(s).mins; a.extra+=extraMins(s,c); if(ended(s) && !c?.in) a.miss++; if(c?.flag) a.flag++; } return o; };
+    a.n++; if(night(s)) a.night++; a.mins+=workedMins(s,c) ?? times(s).mins; a.extra+=extraMins(s,c); if(ended(s) && !effMark(s)?.in) a.miss++; if(c?.flag) a.flag++; } return o; };
   const byH=agg('hospitalId'), byR=agg('residentId');
   const tot=Object.values(byH).reduce((t,a)=>({n:t.n+a.n, extra:t.extra+a.extra, miss:t.miss+a.miss, mins:t.mins+a.mins}), {n:0,extra:0,miss:0,mins:0});
   const apprTot=Object.values(apprBy).reduce((t,m)=>t+m,0);
@@ -1323,9 +1315,10 @@ const readWS = (i, x) => { const boxes=[...document.querySelectorAll(`input[data
 // ---------- conferência do pedido de compensação: escala x registro real ----------
 function regBlock(q, s, c){
   if(!s) return `<div class="regbox"><div class="regrow"><span>Plantão</span><b>${esc(q.shiftDate?fmtShort(q.shiftDate):'—')}</b></div><div class="muted" style="font-size:.84rem">Este plantão não está mais na escala.</div></div>`;
-  const t=times(s), ago=(a,b)=>Math.round((a-b)/60000);
+  const cm=chainMark(s); if(cm) c=cm.m;
+  const t=cm?{a:cm.ch.a,b:cm.ch.b,mins:cm.ch.mins}:times(s), ago=(a,b)=>Math.round((a-b)/60000);
   const dayTag = d => isoDate(d)!==s.date ? ` <span class="muted">(${fmtShort(isoDate(d))})</span>` : '';
-  const rows=[`<div class="regrow"><span>Escala</span><b><span class="time">${s.start}–${s.end}</span> <span class="muted" style="font-weight:500">${fmtDur(t.mins)}</span></b></div>`];
+  const rows=[`<div class="regrow"><span>Escala</span><b><span class="time">${cm?cm.ch.start:s.start}–${cm?cm.ch.end:s.end}</span> <span class="muted" style="font-weight:500">${fmtDur(t.mins)}</span>${cm?`<span class="dlt">${cm.ch.ids.length} plantões seguidos, uma jornada só</span>`:''}</b></div>`];
   let before=0, after=0;
   if(!c?.in){
     rows.push(`<div class="regrow"><span>Check-in</span><b style="color:var(--bad)">sem registro</b></div>`);
@@ -1345,6 +1338,76 @@ function regBlock(q, s, c){
     if(q.minutes>tot) sum+=`<div class="warnline">O pedido (${fmtDur(q.minutes)}) é maior que o tempo registrado além da escala.</div>`;
   } else sum=`<div class="warnline">Sem ${c?.in?'checkout':'check-in'} registrado: não dá para conferir as horas pelo app.</div>`;
   return `<div class="regbox">${rows.join('')}${sum}</div>`;
+}
+
+// ---------- botões separados de check-in e checkout ----------
+function meActions(s, c, t, now){
+  const openAt=new Date(t.a.getTime()-60*60000);
+  const canIn = !c?.in && now>=openAt && now<=t.b;
+  const btn=(cls, k, v, act)=>`<button class="big io ${cls}" ${act?`data-act="${act}" data-id="${esc(s.id)}"`:'disabled'}><span class="io-k">${k}</span><span class="io-v">${v}</span></button>`;
+  const inBtn = c?.in ? btn('done','Check-in',`✓ ${hm(new Date(c.in))}`)
+    : canIn ? btn('ok','Check-in',`agora · ${hm(now)}`,'checkin')
+    : btn('','Check-in',`abre às ${hm(openAt)}${isoDate(openAt)!==today()?' de '+fmtShort(isoDate(openAt)):''}`);
+  const outBtn = c?.out ? btn('done','Checkout',`✓ ${hm(new Date(c.out))}`)
+    : c?.in ? btn('primary','Checkout',`agora · ${hm(now)}`,'checkout')
+    : btn('','Checkout','depois do check-in');
+  let extra='';
+  if (c?.in && !c?.out){
+    const over=Math.round((now-t.b)/60000);
+    extra = over>0 ? `<div class="muted" style="font-size:.88rem">O horário da escala terminou há ${fmtDur(over)}. Se precisar, peça compensação em Meus plantões depois do checkout.</div>` : `<div class="muted" style="font-size:.88rem">Faltam ${fmtDur((t.b-now)/60000)} para o fim do horário da escala.</div>`;
+  }
+  return `<div class="inout">${inBtn}${outBtn}</div>${extra}`;
+}
+{ const oIn=actions.checkin, oOut=actions.checkout;
+  actions.checkin=async function(el){ if(S.marking) return; S.marking=true; el.disabled=true; try{ await oIn.call(this, el); } finally { S.marking=false; render(); } };
+  actions.checkout=async function(el){
+    if(S.marking) return;
+    if(!el_confirm('out'+el.dataset.id)){ const v=el.querySelector('.io-v'); if(v) v.textContent='toque de novo para confirmar'; el.classList.add('confirm'); setTimeout(()=>{ if(document.body.contains(el)) render(); }, 5000); return; }
+    S.marking=true; el.disabled=true; try{ await oOut.call(this, el); } finally { S.marking=false; render(); }
+  };
+}
+
+// ---------- plantões seguidos (ex.: 24h lançado como diurno + noturno) contam como uma jornada só ----------
+// Um plantão que começa exatamente quando o anterior do mesmo residente termina, no mesmo hospital,
+// forma uma jornada contínua: um check-in no primeiro e um checkout no fim valem para todos.
+let _chSrc=null, _ch={};
+function chains(){
+  if(_chSrc===S.schedule) return _ch;
+  _chSrc=S.schedule; _ch={};
+  const groups={};
+  for (const s of allShifts()){ const k=s.residentId+'|'+s.hospitalId; (groups[k]=groups[k]||[]).push({s, t:times(s)}); }
+  for (const g of Object.values(groups)){
+    g.sort((x,y)=>x.t.a-y.t.a);
+    let run=[g[0]];
+    const flush=()=>{ if(run.length<2) return; const last=run[run.length-1];
+      const info={head:run[0].s.id, ids:run.map(x=>x.s.id), a:run[0].t.a, b:last.t.b, start:run[0].s.start, end:last.s.end};
+      info.mins=(info.b-info.a)/60000; run.forEach(x=>_ch[x.s.id]=info); };
+    for (let i=1;i<g.length;i++){ if(g[i].t.a.getTime()===run[run.length-1].t.b.getTime()) run.push(g[i]); else { flush(); run=[g[i]]; } }
+    flush();
+  }
+  return _ch;
+}
+const chainOf = s => (s && chains()[s.id]) || null;
+// registro da jornada: o check-in feito no primeiro plantão vale para os seguintes
+function chainMark(s){ const ch=chainOf(s); if(!ch) return null; const m=S.marks[ch.head]; return m?.in ? {ch, m} : null; }
+function effMark(s){ const cm=chainMark(s); if(cm && s.id!==cm.ch.head) return cm.m; return S.marks[s.id]; }
+function spanTimes(s){ const ch=chainOf(s); return ch && ch.head===s.id ? {a:ch.a, b:ch.b, mins:ch.mins} : times(s); }
+const spanEnd = s => chainOf(s)?.b || times(s).b;
+function spanText(s){ const ch=chainOf(s); if(!ch) return `${s.start}–${s.end} (${fmtDur(times(s).mins)})`; return `${ch.start}–${ch.end} (${fmtDur(ch.mins)} seguidas, ${ch.ids.length} plantões)`; }
+function workedMins(s, c){
+  const cm=chainMark(s);
+  if(cm && s.id!==cm.ch.head) return cm.m.out ? 0 : null;   // horas já contadas no primeiro plantão
+  return workedMins0(s, c);
+}
+function extraMins(s, c){
+  const cm=chainMark(s);
+  if(cm){ if(s.id!==cm.ch.head) return 0; const w=workedMins0(s, c); return w==null ? 0 : Math.max(0, Math.round(w - cm.ch.mins)); }
+  return extraMins0(s, c);
+}
+function status(s, c){
+  const cm=chainMark(s);
+  if(cm && s.id!==cm.ch.head) return status0(s, cm.m);
+  return status0(s, c);
 }
 
 // ---------- boot (Firebase) ----------
